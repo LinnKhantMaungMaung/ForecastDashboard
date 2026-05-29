@@ -86,10 +86,7 @@ function transformReport(reportData) {
 
   for (const resource of resources) {
     // Determine team name — use first group name, or "Unassigned"
-    const team = (resource.groups && resource.groups[0])
-      ? resource.groups[0].name
-      : 'Unassigned';
-
+    const team = resource.resource_type?.name || resource.type || 'Unassigned';
     const name = resource.name;
     const job_title = resource.job_title || '';
 
@@ -164,7 +161,7 @@ function transformFromBookings(resources, bookings) {
   // Build a lookup: resource_id → { name, team, job_title }
   const resourceInfo = {};
   for (const r of resources) {
-    const team = (r.groups && r.groups[0]) ? r.groups[0].name : 'Unassigned';
+    const team = resource.resource_type?.name || resource.type || 'Unassigned';
     resourceInfo[r.id] = { name: r.name, team, job_title: r.job_title || '' };
   }
 
