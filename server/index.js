@@ -133,7 +133,15 @@ app.get('/api/utilisation', async (req, res) => {
  *   messages: [{ role: "user"|"assistant", content: string }]
  * }
  */
-
+app.get('/api/debug', async (req, res) => {
+  try {
+    const { fetchReport } = require('./resourceGuru');
+    const data = await fetchReport('2026-01-01', '2026-12-31');
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
