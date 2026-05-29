@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -256,6 +257,7 @@
     <div class="nav-tab" onclick="showPage('heatmap')">Heatmap</div>
     <div class="nav-tab" onclick="showPage('engineers')">Engineers</div>
     <div class="nav-tab" onclick="showPage('scenario')">⚡ Scenario Planner</div>
+    <div class="nav-tab" id="ai-nav-tab" onclick="showPage('ai')">🤖 AI Insights</div>
   </div>
   <div id="data-status" style="margin-left:auto;padding:0 20px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
     <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block"></span>
@@ -490,8 +492,9 @@
 let RAW = { teams: [], engineers: [], engineer_list: [] };
 
 
-const ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort();
-const ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
+// These are populated inside init() after RAW is loaded from the API
+let ALL_WEEKS = [];
+let ALL_TEAMS = [];
 
 // ===================== STATE =====================
 let viewMode = 'team'; // 'team' | 'engineer'
@@ -504,6 +507,9 @@ let engTableRows = [];
 
 // ===================== INIT =====================
 function init() {
+  // Recompute from live RAW data (populated from the API by loadLiveData)
+  ALL_WEEKS = [...new Set(RAW.teams.map(r => r.week))].sort();
+  ALL_TEAMS = [...new Set(RAW.teams.map(r => r.team))].sort();
   populateSelects();
   renderUtilisation();
   renderHeatmap();
