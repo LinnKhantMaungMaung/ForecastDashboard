@@ -133,37 +133,6 @@ app.get('/api/utilisation', async (req, res) => {
  *   messages: [{ role: "user"|"assistant", content: string }]
  * }
  */
-    if (system) payload.system = system;
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      return res.status(response.status).json({ error: `Claude API error: ${body}` });
-    }
-
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error('[/api/claude] Error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * GET * → Serve dashboard (SPA fallback)
- */
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
