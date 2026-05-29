@@ -147,6 +147,13 @@ app.get('/api/debug-resource', async (req, res) => {
   const resources = await fetchResources();
   res.json(resources[0]); // show first resource in full
 });
+app.get('/api/debug-report', async (req, res) => {
+  const { fetchReport } = require('./resourceGuru');
+  const data = await fetchReport('2026-01-01', '2026-12-31');
+  // Show just the first resource
+  const first = Array.isArray(data) ? data[0] : (data.resources || data.data || [])[0];
+  res.json(first);
+});
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
