@@ -19,7 +19,7 @@ const { fetchResources, fetchBookings, fetchReport } = require('./resourceGuru')
 const { transformReport, transformFromBookings }     = require('./transformer');
 
 const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '900000', 10); // 15 min
 
 // ── Middleware ────────────────────────────────────────────────────────────────
