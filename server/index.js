@@ -154,6 +154,11 @@ app.get('/api/debug-report', async (req, res) => {
   const first = Array.isArray(data) ? data[0] : (data.resources || data.data || [])[0];
   res.json(first);
 });
+app.get('/api/debug-bookings', async (req, res) => {
+  const { fetchBookings } = require('./resourceGuru');
+  const bookings = await fetchBookings('2026-04-01', '2026-04-30');
+  res.json({ count: bookings.length, first: bookings[0], second: bookings[1] });
+});
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
