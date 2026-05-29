@@ -19,13 +19,8 @@ const { authenticate, fetchReportRange } = require('./resourceGuru');
 const { buildRawData } = require('./transformer');
 
 const app  = express();
-<<<<<<< HEAD
 const PORT = process.env.PORT || 3000;
 const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '3600000', 10); // default 1 hour
-=======
-const PORT = process.env.PORT || 10000;
-const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '900000', 10); // 15 min
->>>>>>> 8e605bceaa7667cfe7af49d33740550954ac7e13
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -113,7 +108,6 @@ app.get('/api/debug-week', async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 app.get('/api/utilisation', async (req, res) => {
   try {
     if (req.query.refresh === '1') await refreshCache();
@@ -147,53 +141,13 @@ app.post('/api/claude', async (req, res) => {
     });
     if (!r.ok) return res.status(r.status).json({ error: await r.text() });
     res.json(await r.json());
-=======
-/**
- * POST /api/claude
- * Proxies a request to the Anthropic Claude API.
- * The frontend sends: { messages: [...], system?: "..." }
- * We add the model + API key server-side (key never reaches the browser).
- *
- * Body shape:
- * {
- *   system:   string (optional),
- *   messages: [{ role: "user"|"assistant", content: string }]
- * }
- */
-app.get('/api/debug', async (req, res) => {
-  try {
-    const { fetchReport } = require('./resourceGuru');
-    const data = await fetchReport('2026-01-01', '2026-12-31');
-    res.json(data);
->>>>>>> 8e605bceaa7667cfe7af49d33740550954ac7e13
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-<<<<<<< HEAD
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
-=======
-app.get('/api/debug-resource', async (req, res) => {
-  const { fetchResources } = require('./resourceGuru');
-  const resources = await fetchResources();
-  res.json(resources[0]); // show first resource in full
-});
-app.get('/api/debug-report', async (req, res) => {
-  const { fetchReport } = require('./resourceGuru');
-  const data = await fetchReport('2026-01-01', '2026-12-31');
-  // Show just the first resource
-  const first = Array.isArray(data) ? data[0] : (data.resources || data.data || [])[0];
-  res.json(first);
-});
-app.get('/api/debug-bookings', async (req, res) => {
-  const { fetchBookings } = require('./resourceGuru');
-  const bookings = await fetchBookings('2026-04-01', '2026-04-30');
-  res.json({ count: bookings.length, first: bookings[0], second: bookings[1] });
-});
-// ── Start ─────────────────────────────────────────────────────────────────────
->>>>>>> 8e605bceaa7667cfe7af49d33740550954ac7e13
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy on http://localhost:${PORT}`);
   console.log(`   RG account: ${process.env.RG_ACCOUNT || '(not set)'}`);
