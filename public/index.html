@@ -1136,7 +1136,7 @@ async function loadLiveData() {
     init();
 
     // Auto-refresh every 15 minutes
-    setTimeout(loadLiveData, parseInt('360'));
+    setTimeout(loadLiveData, parseInt('6000'));
   } catch (err) {
     setStatus('error', 'Failed to load live data');
     console.error('loadLiveData error:', err);
