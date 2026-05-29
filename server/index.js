@@ -19,7 +19,7 @@ const { fetchResources, fetchBookings, fetchReport } = require('./resourceGuru')
 const { transformReport, transformFromBookings }     = require('./transformer');
 
 const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '900000', 10); // 15 min
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -133,30 +133,6 @@ app.get('/api/utilisation', async (req, res) => {
  *   messages: [{ role: "user"|"assistant", content: string }]
  * }
  */
-    if (system) payload.system = system;
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      return res.status(response.status).json({ error: `Claude API error: ${body}` });
-    }
-
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error('[/api/claude] Error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 /**
  * GET * → Serve dashboard (SPA fallback)
