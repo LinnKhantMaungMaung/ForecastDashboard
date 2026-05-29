@@ -74,80 +74,74 @@ function allWeeksBetween(from, to) {
 // }
 // ─────────────────────────────────────────────────────────────────────────────
 function transformReport(reportData) {
-  // reportData may be { resources: [...] } or an array directly
   const resources = Array.isArray(reportData)
     ? reportData
     : (reportData.resources || reportData.data || []);
 
-  // ── Build engineers array (week-level rows) ─────────────────────────────
-  const engineersMap = {};  // `${name}|${week}` → row
-  const teamsMap = {};      // `${team}|${week}` → { avail, util, headcount: Set }
-  const engineerList = {}; // name → { name, team, job_title }
+  // Get team from custom_fields or job_title grouping
+  // Since RG returns "Person" as resource_type for all,
+  // we use job_title as the team proxy
+  function getTeam(resource) {
+    const jt = resource.job_title || '';
+    if (jt.includes('Installation Electrician') || jt.includes('Engineering Manager') || jt.includes('QA') || jt.includes('Electrical Labourer')) return 'Electrical Installation';
+    if (jt.includes('Controls Engineer') || jt.includes('Head of Controls') || jt.includes('Controls Manager')) return 'PLC';
+    if (jt.includes('Project Engineer') || jt.includes('Project Manager') || jt.includes('Head of Automation') || jt.includes('Head of Service')) return 'Projects';
+    if (jt.includes('Service Engineer') || jt.includes('Service Manager')) return 'Service';
+    if (jt.includes('Design Engineer') || jt.includes('Lead Design')) return 'Design';
+    if (jt.includes('Software') || jt.includes('WCS') || jt.includes('WMS')) return 'HELIX';
+    if (jt.includes('Robotics')) return 'Robotics';
+    if (jt.includes('Workshop') || jt.includes('Apprentice')) return 'Control Panels - Notts';
+    if (jt.includes('Director') || jt.includes('Managing')) return 'Director';
+    if (jt.includes('Accounts') || jt.includes('Business Support') || jt.includes('Supply Chain')) return 'Office';
+    return jt || 'Unassigned';
+  }
+
+  const engineerList = {};
+  const teamsMap = {};
+  const engineersMap = {};
 
   for (const resource of resources) {
-    // Determine team name — use first group name, or "Unassigned"
-    const team = resource.resource_type?.name || resource.type || 'Unassigned';
     const name = resource.name;
     const job_title = resource.job_title || '';
+    const team = getTeam(resource);
 
-    // Track unique engineers
-    if (!engineerList[name]) {
-      engineerList[name] = { name, team, job_title };
-    }
+    engineerList[name] = { name, team, job_title };
 
-    // Walk week entries
+    // Use the weeks object if present, otherwise use aggregate totals
     const weeks = resource.weeks || {};
-    for (const [isoMonday, wdata] of Object.entries(weeks)) {
-      const weekLabel = toWeekLabel(new Date(isoMonday));
-      const avail  = wdata.available_hours || 0;
-      const util   = wdata.booked_hours    // v2 uses "booked_hours"
-                  || wdata.utilized_hours  // fallback name
-                  || 0;
+    const weekEntries = Object.entries(weeks);
 
-      // Engineer row
-      const engKey = `${name}|${weekLabel}`;
-      if (!engineersMap[engKey]) {
-        engineersMap[engKey] = {
-          week: weekLabel, name, team, job_title,
-          available_hours: 0, utilized_hours: 0,
-        };
-      }
-      engineersMap[engKey].available_hours += avail;
-      engineersMap[engKey].utilized_hours  += util;
+    if (weekEntries.length > 0) {
+      for (const [isoMonday, wdata] of weekEntries) {
+        const weekLabel = toWeekLabel(new Date(isoMonday));
+        const avail = wdata.available_hours || wdata.availability || 0;
+        const util  = wdata.booked_hours || wdata.booked || 0;
 
-      // Team aggregate row
-      const teamKey = `${team}|${weekLabel}`;
-      if (!teamsMap[teamKey]) {
-        teamsMap[teamKey] = {
-          week: weekLabel, team,
-          available_hours: 0, utilized_hours: 0,
-          _headcountSet: new Set(),
-        };
-      }
-      teamsMap[teamKey].available_hours += avail;
-      teamsMap[teamKey].utilized_hours  += util;
-      if (avail > 0 || util > 0) {
-        teamsMap[teamKey]._headcountSet.add(name);
+        const engKey = `${name}|${weekLabel}`;
+        if (!engineersMap[engKey]) {
+          engineersMap[engKey] = { week: weekLabel, name, team, job_title, available_hours: 0, utilized_hours: 0 };
+        }
+        engineersMap[engKey].available_hours += avail;
+        engineersMap[engKey].utilized_hours  += util;
+
+        const teamKey = `${team}|${weekLabel}`;
+        if (!teamsMap[teamKey]) {
+          teamsMap[teamKey] = { week: weekLabel, team, available_hours: 0, utilized_hours: 0, _hc: new Set() };
+        }
+        teamsMap[teamKey].available_hours += avail;
+        teamsMap[teamKey].utilized_hours  += util;
+        teamsMap[teamKey]._hc.add(name);
       }
     }
   }
 
-  // Finalise headcount (Set → count) and strip the private _headcountSet
-  const teams = Object.values(teamsMap).map(row => {
-    const { _headcountSet, ...rest } = row;
-    return { ...rest, headcount: _headcountSet.size };
-  });
-
-  const engineers = Object.values(engineersMap);
+  const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({ ...rest, headcount: _hc.size }));
 
   return {
     teams:         teams.sort((a, b) => a.week.localeCompare(b.week) || a.team.localeCompare(b.team)),
-    engineers:     engineers.sort((a, b) => a.week.localeCompare(b.week) || a.name.localeCompare(b.name)),
-    engineer_list: Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name)),
-    meta: {
-      fetched_at: new Date().toISOString(),
-      resource_count: resources.length,
-    },
+    engineers:     Object.values(engineersMap).sort((a, b) => a.week.localeCompare(b.week)),
+    engineer_list: Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team)),
+    meta: { fetched_at: new Date().toISOString(), resource_count: resources.length },
   };
 }
 
