@@ -142,6 +142,11 @@ app.get('/api/debug', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.get('/api/debug-resource', async (req, res) => {
+  const { fetchResources } = require('./resourceGuru');
+  const resources = await fetchResources();
+  res.json(resources[0]); // show first resource in full
+});
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
