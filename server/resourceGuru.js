@@ -7,7 +7,7 @@
 
 const fetch = require('node-fetch');
 
-const BASE = 'https://api.resourceguruapp.com/v1/me';
+const BASE = 'https://api.resourceguruapp.com/v1';
 const TOKEN_URL = 'https://api.resourceguruapp.com/oauth/token';
 
 // ── Token state (in-memory; fine for a single-process proxy) ──────────────────
