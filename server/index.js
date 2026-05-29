@@ -1,0 +1,191 @@
+// server/index.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Express proxy server
+// Routes:
+//   GET  /api/utilisation   → Returns RAW data (teams + engineers) for dashboard
+//   GET  /api/health        → Health + cache status
+//   POST /api/claude        → Forwards requests to Claude for AI insights
+//   GET  /                  → Serves the dashboard HTML
+// ─────────────────────────────────────────────────────────────────────────────
+
+require('dotenv').config();
+
+const express = require('express');
+const cors    = require('cors');
+const path    = require('path');
+const fetch   = require('node-fetch');
+
+const { fetchResources, fetchBookings, fetchReport } = require('./resourceGuru');
+const { transformReport, transformFromBookings }     = require('./transformer');
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '900000', 10); // 15 min
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json({ limit: '2mb' }));
+app.use(express.static(path.join(__dirname, '../public')));
+
+// ── In-memory cache ───────────────────────────────────────────────────────────
+let cache = {
+  data:        null,   // the RAW object
+  fetchedAt:   null,   // Date
+  expiresAt:   null,   // Date
+};
+
+function isCacheValid() {
+  return cache.data && cache.expiresAt && new Date() < cache.expiresAt;
+}
+
+// ── Core data fetcher ─────────────────────────────────────────────────────────
+async function refreshCache() {
+  console.log('[Cache] Refreshing data from Resource Guru...');
+
+  // Date range: today's year start → 12 months forward
+  const now   = new Date();
+  const from  = new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);  // Jan 1 this year
+  const to    = new Date(now.getFullYear() + 1, 0, 1).toISOString().slice(0, 10); // Jan 1 next year
+
+  let raw;
+  try {
+    // Try the reports endpoint first (most accurate)
+    const reportData = await fetchReport(from, to);
+    raw = transformReport(reportData);
+    console.log(`[Cache] Transformed report: ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
+  } catch (err) {
+    console.warn('[Cache] Reports endpoint failed, falling back to bookings:', err.message);
+    // Fallback: fetch resources + bookings and transform manually
+    const [resources, bookings] = await Promise.all([
+      fetchResources(),
+      fetchBookings(from, to),
+    ]);
+    raw = transformFromBookings(resources, bookings);
+    console.log(`[Cache] Transformed bookings: ${raw.teams.length} team-week rows`);
+  }
+
+  cache.data      = raw;
+  cache.fetchedAt = new Date();
+  cache.expiresAt = new Date(Date.now() + CACHE_TTL);
+  console.log(`[Cache] Ready. Next refresh at ${cache.expiresAt.toISOString()}`);
+  return raw;
+}
+
+// Kick off first fetch on startup (non-blocking)
+refreshCache().catch(err => {
+  console.error('[Cache] Initial fetch failed:', err.message);
+  console.error('        Check your .env credentials and try again.');
+});
+
+// Auto-refresh on schedule
+setInterval(() => {
+  refreshCache().catch(err => console.error('[Cache] Refresh error:', err.message));
+}, CACHE_TTL);
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/health
+ * Returns server status and cache metadata
+ */
+app.get('/api/health', (req, res) => {
+  res.json({
+    status:    'ok',
+    cacheValid: isCacheValid(),
+    fetchedAt:  cache.fetchedAt,
+    expiresAt:  cache.expiresAt,
+    meta:       cache.data?.meta || null,
+  });
+});
+
+/**
+ * GET /api/utilisation
+ * Returns the RAW object exactly matching the dashboard's expected shape.
+ * Query params:
+ *   ?refresh=1   → force a cache refresh first
+ */
+app.get('/api/utilisation', async (req, res) => {
+  try {
+    if (req.query.refresh === '1' || !isCacheValid()) {
+      await refreshCache();
+    }
+
+    if (!cache.data) {
+      return res.status(503).json({ error: 'Data not yet available. Please wait a moment and retry.' });
+    }
+
+    res.json(cache.data);
+  } catch (err) {
+    console.error('[/api/utilisation] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/claude
+ * Proxies a request to the Anthropic Claude API.
+ * The frontend sends: { messages: [...], system?: "..." }
+ * We add the model + API key server-side (key never reaches the browser).
+ *
+ * Body shape:
+ * {
+ *   system:   string (optional),
+ *   messages: [{ role: "user"|"assistant", content: string }]
+ * }
+ */
+app.post('/api/claude', async (req, res) => {
+  const { messages, system } = req.body;
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array required' });
+  }
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
+  }
+
+  try {
+    const payload = {
+      model:      'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages,
+    };
+    if (system) payload.system = system;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type':      'application/json',
+        'x-api-key':         process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return res.status(response.status).json({ error: `Claude API error: ${body}` });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('[/api/claude] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET * → Serve dashboard (SPA fallback)
+ */
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
+  console.log(`   Resource Guru account: ${process.env.RG_ACCOUNT || '(not set)'}`);
+  console.log(`   Cache TTL: ${CACHE_TTL / 60000} minutes`);
+  console.log(`   Claude AI: ${process.env.ANTHROPIC_API_KEY ? '✓ configured' : '✗ missing ANTHROPIC_API_KEY'}\n`);
+});

@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resource Utilisation Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #161920;
+    --surface2: #1e222d;
+    --border: #2a2f3d;
+    --text: #e8eaf0;
+    --muted: #6b7280;
+    --accent: #4f8ef7;
+    --accent2: #7c3aed;
+    --green: #22c55e;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --orange: #f97316;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; }
+
+  /* NAV */
+  nav {
+    display: flex; align-items: center; gap: 0;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 24px; position: sticky; top: 0; z-index: 100;
+  }
+  .nav-brand {
+    font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); padding: 18px 0; margin-right: 32px; white-space: nowrap;
+  }
+  .nav-tabs { display: flex; gap: 0; }
+  .nav-tab {
+    padding: 18px 20px; cursor: pointer; font-size: 13px; font-weight: 600;
+    color: var(--muted); border-bottom: 2px solid transparent; transition: all .2s;
+    letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* PAGE */
+  .page { display: none; padding: 28px 32px; max-width: 1600px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* HEADER ROW */
+  .page-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+  }
+  .page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  .page-subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
+
+  /* CONTROLS */
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .pill-group { display: flex; background: var(--surface2); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .pill {
+    padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    color: var(--muted); transition: all .15s; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .pill.active { background: var(--accent); color: #fff; }
+  .pill:hover:not(.active) { color: var(--text); background: var(--border); }
+
+  select {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: 8px; font-size: 13px; font-family: 'Syne', sans-serif;
+    cursor: pointer; outline: none;
+  }
+  select:focus { border-color: var(--accent); }
+
+  /* KPI CARDS */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; position: relative; overflow: hidden;
+  }
+  .kpi::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--kpi-color, var(--accent));
+  }
+  .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 8px; }
+  .kpi-value { font-size: 28px; font-weight: 800; letter-spacing: -0.03em; }
+  .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: 'DM Mono', monospace; }
+
+  /* CHART CARD */
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; margin-bottom: 20px;
+  }
+  .chart-card-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
+  }
+  .chart-card-title { font-size: 15px; font-weight: 700; }
+  .chart-card-subtitle { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .chart-container { position: relative; width: 100%; }
+
+  /* TABLE */
+  .table-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; margin-bottom: 20px;
+  }
+  .table-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .table-title { font-size: 14px; font-weight: 700; }
+  .search-input {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-family: 'Syne', sans-serif;
+    width: 200px; outline: none;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+    background: var(--surface2); border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  th:hover { color: var(--text); }
+  td { padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(79,142,247,0.04); }
+  .mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+
+  /* UTIL BAR */
+  .util-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .util-bar { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; min-width: 60px; }
+  .util-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .util-pct { font-family: 'DM Mono', monospace; font-size: 12px; min-width: 38px; text-align: right; }
+
+  /* BADGE */
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .badge-green { background: rgba(34,197,94,.15); color: var(--green); }
+  .badge-yellow { background: rgba(245,158,11,.15); color: var(--yellow); }
+  .badge-orange { background: rgba(249,115,22,.15); color: var(--orange); }
+  .badge-red { background: rgba(239,68,68,.15); color: var(--red); }
+  .badge-blue { background: rgba(79,142,247,.15); color: var(--accent); }
+
+  /* LEGEND */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* SCENARIO PAGE */
+  .scenario-layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
+  @media (max-width: 1100px) { .scenario-layout { grid-template-columns: 1fr; } }
+
+  .form-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; align-self: start;
+  }
+  .form-title { font-size: 15px; font-weight: 700; margin-bottom: 20px; }
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; display: block; }
+  .form-input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px;
+    font-family: 'Syne', sans-serif; outline: none; transition: border-color .15s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .btn {
+    width: 100%; padding: 10px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.04em; transition: all .15s; font-family: 'Syne', sans-serif;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #3a7de4; }
+  .btn-danger { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+  .btn-danger:hover { background: rgba(239,68,68,.25); }
+
+  .project-list { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .project-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+  }
+  .project-chip-name { font-size: 13px; font-weight: 600; }
+  .project-chip-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
+  .chip-remove {
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px;
+    padding: 0; line-height: 1; transition: color .15s;
+  }
+  .chip-remove:hover { color: var(--red); }
+
+  .alert-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .alert {
+    display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px;
+    border-radius: 10px; border-left: 3px solid;
+  }
+  .alert-critical { background: rgba(239,68,68,.08); border-color: var(--red); }
+  .alert-warning { background: rgba(249,115,22,.08); border-color: var(--orange); }
+  .alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .alert-title { font-size: 13px; font-weight: 700; }
+  .alert-body { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+
+  .empty { text-align: center; padding: 48px; color: var(--muted); font-size: 14px; }
+
+  /* TOOLTIP */
+  .tooltip-trigger { cursor: help; }
+
+  /* HEATMAP */
+  .heatmap-grid { overflow-x: auto; }
+  .heatmap-table { border-collapse: separate; border-spacing: 3px; }
+  .heatmap-table th { padding: 6px 8px; font-size: 10px; font-weight: 600; color: var(--muted); white-space: nowrap; background: transparent; cursor: default; }
+  .heatmap-cell {
+    width: 46px; height: 36px; border-radius: 6px; text-align: center; font-size: 10px;
+    font-family: 'DM Mono', monospace; font-weight: 500; cursor: default;
+    vertical-align: middle; transition: transform .1s;
+  }
+  .heatmap-cell:hover { transform: scale(1.12); z-index: 10; position: relative; }
+  .hm-0 { background: var(--surface2); color: var(--muted); }
+  .hm-1 { background: rgba(34,197,94,.2); color: #4ade80; }
+  .hm-2 { background: rgba(34,197,94,.4); color: #22c55e; }
+  .hm-3 { background: rgba(245,158,11,.35); color: #f59e0b; }
+  .hm-4 { background: rgba(249,115,22,.45); color: #fb923c; }
+  .hm-5 { background: rgba(239,68,68,.5); color: #f87171; }
+  .hm-team { font-size: 12px; font-weight: 600; white-space: nowrap; padding: 6px 10px; text-align: left; background: transparent; color: var(--text); }
+
+  /* SCENARIO CHART */
+  #scenario-chart-wrap .chart-card { margin-bottom: 10px; }
+
+  /* ── AI chat panel ── */
+  .ai-msg { display: flex; flex-direction: column; max-width: 88%; }
+  .ai-msg-user { align-self: flex-end; }
+  .ai-msg-assistant { align-self: flex-start; }
+  .ai-msg-bubble {
+    padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ai-msg-user .ai-msg-bubble {
+    background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
+  }
+  .ai-msg-assistant .ai-msg-bubble {
+    background: var(--surface2); border: 1px solid var(--border); border-bottom-left-radius: 3px;
+    color: var(--text);
+  }
+  @keyframes blink { 0%,100%{opacity:.3} 50%{opacity:1} }
+  .ai-typing { letter-spacing: 4px; animation: blink 1.2s infinite; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">📊 Resource Guru</div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="showPage('utilisation')">Utilisation</div>
+    <div class="nav-tab" onclick="showPage('heatmap')">Heatmap</div>
+    <div class="nav-tab" onclick="showPage('engineers')">Engineers</div>
+    <div class="nav-tab" onclick="showPage('scenario')">⚡ Scenario Planner</div>
+    <div class="nav-tab" id="ai-nav-tab" onclick="showPage('ai')">🤖 AI Insights</div>
+  </div>
+  <div id="data-status" style="margin-left:auto;padding:0 20px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
+    <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block"></span>
+    <span id="status-text">Loading...</span>
+  </div>
+</nav>
+
+<!-- UTILISATION PAGE -->
+<div class="page active" id="page-utilisation">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Team Utilisation</div>
+      <div class="page-subtitle">W14 – W40 · Apr – Oct 2026</div>
+    </div>
+    <div class="controls">
+      <div class="pill-group" id="view-toggle">
+        <div class="pill active" onclick="setViewMode('team')">Team</div>
+        <div class="pill" onclick="setViewMode('engineer')">Engineer</div>
+      </div>
+      <select id="team-filter" onchange="renderUtilisation()">
+        <option value="ALL">All Teams</option>
+      </select>
+      <select id="week-range-from" onchange="renderUtilisation()"></select>
+      <select id="week-range-to" onchange="renderUtilisation()"></select>
+    </div>
+  </div>
+
+  <div class="kpi-grid" id="kpi-grid"></div>
+
+  <div class="chart-card">
+    <div class="chart-card-header">
+      <div>
+        <div class="chart-card-title" id="chart-title">Weekly Utilisation by Team</div>
+        <div class="chart-card-subtitle">Percentage of available hours utilised per week</div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>&lt;70% Healthy</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>70–85% Busy</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>85–95% High</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>>95% Critical</div>
+      </div>
+    </div>
+    <div class="chart-container" style="height:380px">
+      <canvas id="main-chart"></canvas>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-title" id="table-title">Team Breakdown</div>
+      <input class="search-input" id="table-search" placeholder="Search..." oninput="filterTable()">
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead id="table-head"></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- HEATMAP PAGE -->
+<div class="page" id="page-heatmap">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Utilisation Heatmap</div>
+      <div class="page-subtitle">Team × Week · colour = utilisation %</div>
+    </div>
+    <div class="controls">
+      <select id="heatmap-filter" onchange="renderHeatmap()">
+        <option value="ALL">All Teams</option>
+      </select>
+    </div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-card-header">
+      <div>
+        <div class="chart-card-title">Team Utilisation by Week</div>
+        <div class="chart-card-subtitle">Hover cells to see exact %</div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.2)"></div>0–40%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.4)"></div>40–70%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(245,158,11,.35)"></div>70–85%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(249,115,22,.45)"></div>85–95%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,.5)"></div>>95%</div>
+      </div>
+    </div>
+    <div class="heatmap-grid" id="heatmap-container"></div>
+  </div>
+</div>
+
+<!-- ENGINEERS PAGE -->
+<div class="page" id="page-engineers">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Engineer Utilisation</div>
+      <div class="page-subtitle">Individual weekly breakdown</div>
+    </div>
+    <div class="controls">
+      <select id="eng-team-filter" onchange="renderEngineers()">
+        <option value="ALL">All Teams</option>
+      </select>
+      <select id="eng-week-from" onchange="renderEngineers()"></select>
+      <select id="eng-week-to" onchange="renderEngineers()"></select>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-card-header">
+      <div>
+        <div class="chart-card-title">Engineer Weekly Utilisation</div>
+        <div class="chart-card-subtitle">Average utilisation over selected week range</div>
+      </div>
+    </div>
+    <div class="chart-container" style="height:420px">
+      <canvas id="eng-chart"></canvas>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-title">Engineer Detail</div>
+      <input class="search-input" id="eng-search" placeholder="Search engineer..." oninput="filterEngTable()">
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead id="eng-table-head"></thead>
+        <tbody id="eng-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- SCENARIO PLANNER PAGE -->
+<div class="page" id="page-scenario">
+  <div class="page-header">
+    <div>
+      <div class="page-title">⚡ Scenario Planner</div>
+      <div class="page-subtitle">Model forecasted projects and identify resource bottlenecks</div>
+    </div>
+  </div>
+
+  <div class="scenario-layout">
+    <!-- LEFT: Add project form -->
+    <div>
+      <div class="form-card">
+        <div class="form-title">Add Forecasted Project</div>
+        <div class="form-group">
+          <label class="form-label">Project Name</label>
+          <input class="form-input" id="proj-name" placeholder="e.g. Amazon DRH5">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Team</label>
+          <select class="form-input" id="proj-team" style="cursor:pointer"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hours per Week</label>
+          <input class="form-input" id="proj-hours" type="number" min="1" max="400" placeholder="e.g. 40">
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Start Week</label>
+            <select class="form-input" id="proj-start" style="cursor:pointer"></select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">End Week</label>
+            <select class="form-input" id="proj-end" style="cursor:pointer"></select>
+          </div>
+        </div>
+        <div style="height:16px"></div>
+        <button class="btn btn-primary" onclick="addProject()">+ Add to Scenario</button>
+      </div>
+
+      <div class="project-list" id="project-list">
+        <div class="empty" style="padding:24px">No forecasted projects yet.<br>Add one above to model the impact.</div>
+      </div>
+
+      <div style="margin-top:12px" id="clear-btn-wrap" style="display:none">
+        <button class="btn btn-danger" onclick="clearProjects()">Clear All Projects</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Results -->
+    <div>
+      <div id="alert-container"></div>
+
+      <div id="scenario-chart-wrap">
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">Projected vs Actual Utilisation</div>
+              <div class="chart-card-subtitle">Baseline (solid) + forecasted load (dashed). Select team to inspect.</div>
+            </div>
+            <select id="scenario-team-select" onchange="renderScenario()" style="min-width:180px"></select>
+          </div>
+          <div class="chart-container" style="height:340px">
+            <canvas id="scenario-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">Bottleneck Summary — All Teams</div>
+          </div>
+          <div style="overflow-x:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Team</th>
+                  <th>Week</th>
+                  <th>Baseline Util%</th>
+                  <th>Forecast Load (hrs)</th>
+                  <th>Projected Util%</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="bottleneck-body">
+                <tr><td colspan="6" class="empty">Add a forecasted project to see bottleneck analysis.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================== DATA =====================
+// RAW is populated dynamically by loadLiveData()
+let RAW = { teams: [], engineers: [], engineer_list: [] };
+
+
+const ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort();
+const ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
+
+// ===================== STATE =====================
+let viewMode = 'team'; // 'team' | 'engineer'
+let mainChart = null;
+let engChart = null;
+let scenarioChart = null;
+let forecastProjects = [];
+let tableRows = [];
+let engTableRows = [];
+
+// ===================== INIT =====================
+function init() {
+  populateSelects();
+  renderUtilisation();
+  renderHeatmap();
+  renderEngineers();
+  renderScenario();
+}
+
+function populateSelects() {
+  const teamOpts = ALL_TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
+
+  // Utilisation page
+  document.getElementById('team-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
+  const weekOpts = ALL_WEEKS.map(w=>`<option value="${w}">${w}</option>`).join('');
+  const wf = document.getElementById('week-range-from');
+  const wt = document.getElementById('week-range-to');
+  wf.innerHTML = weekOpts; wt.innerHTML = weekOpts;
+  wf.value = ALL_WEEKS[0]; wt.value = ALL_WEEKS[ALL_WEEKS.length-1];
+
+  // Heatmap
+  document.getElementById('heatmap-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
+
+  // Engineers page
+  document.getElementById('eng-team-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
+  const ewf = document.getElementById('eng-week-from');
+  const ewt = document.getElementById('eng-week-to');
+  ewf.innerHTML = weekOpts; ewt.innerHTML = weekOpts;
+  ewf.value = ALL_WEEKS[0]; ewt.value = ALL_WEEKS[ALL_WEEKS.length-1];
+
+  // Scenario
+  document.getElementById('proj-team').innerHTML = teamOpts;
+  document.getElementById('proj-start').innerHTML = weekOpts;
+  document.getElementById('proj-end').innerHTML = weekOpts;
+  document.getElementById('proj-end').value = ALL_WEEKS[ALL_WEEKS.length-1];
+  document.getElementById('scenario-team-select').innerHTML = teamOpts;
+}
+
+// ===================== PAGES =====================
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+  document.getElementById('page-'+p).classList.add('active');
+  event.target.classList.add('active');
+  if (p==='heatmap') renderHeatmap();
+  if (p==='engineers') renderEngineers();
+  if (p==='scenario') renderScenario();
+}
+
+// ===================== VIEW MODE =====================
+function setViewMode(m) {
+  viewMode = m;
+  document.querySelectorAll('#view-toggle .pill').forEach((p,i)=>{
+    p.classList.toggle('active', (i===0&&m==='team')||(i===1&&m==='engineer'));
+  });
+  renderUtilisation();
+}
+
+// ===================== UTIL HELPERS =====================
+function getUtilColor(pct) {
+  if (pct > 95) return '#ef4444';
+  if (pct > 85) return '#f97316';
+  if (pct > 70) return '#f59e0b';
+  return '#22c55e';
+}
+function getBadge(pct) {
+  if (pct > 95) return `<span class="badge badge-red">Critical</span>`;
+  if (pct > 85) return `<span class="badge badge-orange">High</span>`;
+  if (pct > 70) return `<span class="badge badge-yellow">Busy</span>`;
+  if (pct > 0) return `<span class="badge badge-green">Healthy</span>`;
+  return `<span class="badge" style="background:rgba(107,114,128,.15);color:var(--muted)">No Data</span>`;
+}
+function utilBar(pct) {
+  const color = getUtilColor(pct);
+  return `<div class="util-bar-wrap">
+    <div class="util-bar"><div class="util-bar-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
+    <span class="util-pct" style="color:${color}">${pct.toFixed(0)}%</span>
+  </div>`;
+}
+
+function getFilteredWeeks(fromId, toId) {
+  const from = document.getElementById(fromId).value;
+  const to = document.getElementById(toId).value;
+  const fi = ALL_WEEKS.indexOf(from), ti = ALL_WEEKS.indexOf(to);
+  return ALL_WEEKS.slice(Math.min(fi,ti), Math.max(fi,ti)+1);
+}
+
+// ===================== UTILISATION PAGE =====================
+function renderUtilisation() {
+  const teamFilter = document.getElementById('team-filter').value;
+  const weeks = getFilteredWeeks('week-range-from','week-range-to');
+
+  if (viewMode === 'team') renderTeamView(teamFilter, weeks);
+  else renderEngineerViewOnMain(teamFilter, weeks);
+}
+
+function aggregateTeamWeekly(teamFilter, weeks) {
+  // returns {team -> {week -> {avail, util}}}
+  const data = {};
+  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
+  for (const t of teams) {
+    data[t] = {};
+    for (const w of weeks) data[t][w] = {avail:0, util:0};
+  }
+  for (const r of RAW.teams) {
+    if (!weeks.includes(r.week)) continue;
+    if (teamFilter!=='ALL' && r.team!==teamFilter) continue;
+    if (!data[r.team]) continue;
+    data[r.team][r.week].avail += r.available_hours;
+    data[r.team][r.week].util += r.utilized_hours;
+  }
+  return data;
+}
+
+function renderTeamView(teamFilter, weeks) {
+  document.getElementById('chart-title').textContent = 'Weekly Utilisation by Team';
+  document.getElementById('table-title').textContent = 'Team Breakdown';
+  const data = aggregateTeamWeekly(teamFilter, weeks);
+  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
+
+  // KPIs
+  let totalAvail=0, totalUtil=0, maxUtil=0, maxTeam='', overCount=0;
+  for (const t of teams) {
+    let ta=0,tu=0;
+    for (const w of weeks) { ta+=data[t][w].avail; tu+=data[t][w].util; }
+    totalAvail+=ta; totalUtil+=tu;
+    const pct = ta>0 ? tu/ta*100 : 0;
+    if (pct>maxUtil) { maxUtil=pct; maxTeam=t; }
+    if (pct>85) overCount++;
+  }
+  const avgUtil = totalAvail>0 ? totalUtil/totalAvail*100 : 0;
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi" style="--kpi-color:var(--accent)">
+      <div class="kpi-label">Avg Utilisation</div>
+      <div class="kpi-value" style="color:${getUtilColor(avgUtil)}">${avgUtil.toFixed(0)}%</div>
+      <div class="kpi-sub">${totalUtil.toFixed(0)} / ${totalAvail.toFixed(0)} hrs</div>
+    </div>
+    <div class="kpi" style="--kpi-color:var(--red)">
+      <div class="kpi-label">Highest Team</div>
+      <div class="kpi-value" style="font-size:18px;color:${getUtilColor(maxUtil)}">${maxTeam||'—'}</div>
+      <div class="kpi-sub">${maxUtil.toFixed(0)}% utilised</div>
+    </div>
+    <div class="kpi" style="--kpi-color:var(--orange)">
+      <div class="kpi-label">Teams >85%</div>
+      <div class="kpi-value" style="color:${overCount>0?'var(--orange)':'var(--green)'}">${overCount}</div>
+      <div class="kpi-sub">of ${teams.length} teams</div>
+    </div>
+    <div class="kpi" style="--kpi-color:var(--green)">
+      <div class="kpi-label">Weeks Shown</div>
+      <div class="kpi-value">${weeks.length}</div>
+      <div class="kpi-sub">${weeks[0]} → ${weeks[weeks.length-1]}</div>
+    </div>`;
+
+  // Chart — line per team
+  const palette = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399','#f472b6','#60a5fa','#facc15','#c084fc','#38bdf8','#4ade80','#fbbf24','#f87171'];
+  const datasets = teams.slice(0,15).map((t,i)=>{
+    const pcts = weeks.map(w => {
+      const d = data[t][w];
+      return d.avail>0 ? +(d.util/d.avail*100).toFixed(1) : null;
+    });
+    return { label: t, data: pcts, borderColor: palette[i%palette.length], backgroundColor: palette[i%palette.length]+'22', tension:0.4, pointRadius:3, borderWidth:2, spanGaps:true };
+  });
+
+  drawLineChart('main-chart', weeks, datasets, mainChart, c=>mainChart=c);
+
+  // Table
+  tableRows = teams.map(t => {
+    let ta=0,tu=0;
+    const weekData = weeks.map(w=>{ const d=data[t][w]; ta+=d.avail; tu+=d.util; return d.avail>0?+(d.util/d.avail*100).toFixed(1):0; });
+    const avg = ta>0 ? tu/ta*100 : 0;
+    return { team:t, avg, avail:ta, util:tu, weekData };
+  }).sort((a,b)=>b.avg-a.avg);
+
+  document.getElementById('table-head').innerHTML = `<tr><th onclick="sortTeamTable('team')">Team ↕</th>${weeks.map(w=>`<th>${w.replace('2026 ','')}</th>`).join('')}<th onclick="sortTeamTable('avg')">Avg% ↕</th><th>Status</th></tr>`;
+  renderTeamTableBody(weeks);
+}
+
+function renderTeamTableBody(weeks) {
+  const search = (document.getElementById('table-search').value||'').toLowerCase();
+  const filtered = tableRows.filter(r=>r.team.toLowerCase().includes(search));
+  document.getElementById('table-body').innerHTML = filtered.map(r=>`
+    <tr>
+      <td style="font-weight:600">${r.team}</td>
+      ${r.weekData.map(p=>`<td><span class="mono" style="color:${getUtilColor(p)}">${p>0?p.toFixed(0)+'%':'—'}</span></td>`).join('')}
+      <td>${utilBar(r.avg)}</td>
+      <td>${getBadge(r.avg)}</td>
+    </tr>`).join('') || '<tr><td colspan="20" class="empty">No data</td></tr>';
+}
+
+function filterTable() { renderTeamTableBody(getFilteredWeeks('week-range-from','week-range-to')); }
+
+// ===================== HEATMAP =====================
+function renderHeatmap() {
+  const teamFilter = document.getElementById('heatmap-filter').value;
+  const weeks = ALL_WEEKS;
+  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
+  const data = aggregateTeamWeekly(teamFilter, weeks);
+
+  function hmClass(pct) {
+    if (pct===0) return 'hm-0';
+    if (pct<40) return 'hm-1';
+    if (pct<70) return 'hm-2';
+    if (pct<85) return 'hm-3';
+    if (pct<95) return 'hm-4';
+    return 'hm-5';
+  }
+
+  const shortWeeks = weeks.map(w=>w.replace('2026 ',''));
+  let html = `<table class="heatmap-table"><thead><tr><th></th>${shortWeeks.map(w=>`<th>${w}</th>`).join('')}</tr></thead><tbody>`;
+  for (const t of teams) {
+    html += `<tr><td class="hm-team">${t}</td>`;
+    for (const w of weeks) {
+      const d = data[t][w];
+      const pct = d.avail>0 ? d.util/d.avail*100 : 0;
+      html += `<td class="heatmap-cell ${hmClass(pct)}" title="${t} · ${w}: ${pct.toFixed(1)}%">${pct>0?pct.toFixed(0)+'%':'—'}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('heatmap-container').innerHTML = html;
+}
+
+// ===================== ENGINEERS PAGE =====================
+function renderEngineers() {
+  const teamFilter = document.getElementById('eng-team-filter').value;
+  const weeks = getFilteredWeeks('eng-week-from','eng-week-to');
+
+  // Aggregate per engineer across weeks
+  const engMap = {};
+  for (const r of RAW.engineers) {
+    if (!weeks.includes(r.week)) continue;
+    if (teamFilter!=='ALL' && r.team!==teamFilter) continue;
+    if (!engMap[r.name]) engMap[r.name] = {name:r.name,team:r.team,job:r.job_title,avail:0,util:0,weeks:{}};
+    engMap[r.name].avail += r.available_hours;
+    engMap[r.name].util += r.utilized_hours;
+    engMap[r.name].weeks[r.week] = (engMap[r.name].weeks[r.week]||0) + r.utilized_hours;
+  }
+
+  const engs = Object.values(engMap).filter(e=>e.avail>0).sort((a,b)=>(b.util/b.avail)-(a.util/a.avail));
+
+  // Chart — top 20
+  const top20 = engs.slice(0,20);
+  const labels = top20.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' '));
+  const pcts = top20.map(e=>+(e.util/e.avail*100).toFixed(1));
+  const colors = pcts.map(p=>getUtilColor(p));
+
+  if (engChart) engChart.destroy();
+  const ctx = document.getElementById('eng-chart').getContext('2d');
+  engChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[{ label:'Utilisation %', data:pcts, backgroundColor:colors, borderRadius:6 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.raw}% utilised`}} },
+      scales:{
+        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}}, grid:{color:'#2a2f3d'}},
+        y:{min:0,max:100,ticks:{color:'#6b7280',callback:v=>v+'%'}, grid:{color:'#2a2f3d'}}
+      }
+    }
+  });
+
+  // Table
+  engTableRows = engs.map(e=>({...e, pct:e.avail>0?e.util/e.avail*100:0}));
+  document.getElementById('eng-table-head').innerHTML = `<tr><th>Engineer</th><th>Team</th><th>Role</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>`;
+  renderEngTableBody();
+}
+
+function renderEngTableBody() {
+  const search = (document.getElementById('eng-search').value||'').toLowerCase();
+  const filtered = engTableRows.filter(r=>r.name.toLowerCase().includes(search)||r.team.toLowerCase().includes(search));
+  document.getElementById('eng-table-body').innerHTML = filtered.map(r=>`
+    <tr>
+      <td style="font-weight:600">${r.name}</td>
+      <td><span class="badge badge-blue">${r.team}</span></td>
+      <td style="color:var(--muted);font-size:12px">${r.job||'—'}</td>
+      <td class="mono">${r.avail.toFixed(0)}</td>
+      <td class="mono">${r.util.toFixed(0)}</td>
+      <td>${utilBar(r.pct)}</td>
+      <td>${getBadge(r.pct)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="empty">No data</td></tr>';
+}
+function filterEngTable() { renderEngTableBody(); }
+
+// ===================== SCENARIO PLANNER =====================
+function addProject() {
+  const name = document.getElementById('proj-name').value.trim();
+  const team = document.getElementById('proj-team').value;
+  const hours = parseFloat(document.getElementById('proj-hours').value);
+  const start = document.getElementById('proj-start').value;
+  const end = document.getElementById('proj-end').value;
+
+  if (!name) { alert('Enter a project name'); return; }
+  if (!hours || hours<=0) { alert('Enter valid hours per week'); return; }
+
+  const si = ALL_WEEKS.indexOf(start), ei = ALL_WEEKS.indexOf(end);
+  const weeksSpan = ALL_WEEKS.slice(Math.min(si,ei), Math.max(si,ei)+1);
+
+  forecastProjects.push({ id: Date.now(), name, team, hours, start, end, weeksSpan });
+  document.getElementById('proj-name').value = '';
+  renderProjectList();
+  renderScenario();
+}
+
+function removeProject(id) {
+  forecastProjects = forecastProjects.filter(p=>p.id!==id);
+  renderProjectList();
+  renderScenario();
+}
+
+function clearProjects() {
+  forecastProjects = [];
+  renderProjectList();
+  renderScenario();
+}
+
+function renderProjectList() {
+  const el = document.getElementById('project-list');
+  const cbWrap = document.getElementById('clear-btn-wrap');
+  if (!forecastProjects.length) {
+    el.innerHTML = '<div class="empty" style="padding:24px">No forecasted projects yet.<br>Add one above to model the impact.</div>';
+    if(cbWrap) cbWrap.style.display='none';
+    return;
+  }
+  if(cbWrap) cbWrap.style.display='block';
+  el.innerHTML = forecastProjects.map(p=>`
+    <div class="project-chip">
+      <div>
+        <div class="project-chip-name">${p.name}</div>
+        <div class="project-chip-meta">${p.team} · ${p.hours}h/wk · ${p.start} → ${p.end}</div>
+      </div>
+      <button class="chip-remove" onclick="removeProject(${p.id})">×</button>
+    </div>`).join('');
+}
+
+function renderScenario() {
+  const selectedTeam = document.getElementById('scenario-team-select').value;
+  const weeks = ALL_WEEKS;
+
+  // Build baseline team utilisation
+  const baseline = {}; // team -> week -> {avail, util}
+  for (const t of ALL_TEAMS) {
+    baseline[t] = {};
+    for (const w of weeks) baseline[t][w] = {avail:0, util:0};
+  }
+  for (const r of RAW.teams) {
+    if (baseline[r.team] && baseline[r.team][r.week]) {
+      baseline[r.team][r.week].avail += r.available_hours;
+      baseline[r.team][r.week].util += r.utilized_hours;
+    }
+  }
+
+  // Build forecast load per team per week
+  const forecastLoad = {}; // team -> week -> extra hours
+  for (const p of forecastProjects) {
+    if (!forecastLoad[p.team]) forecastLoad[p.team] = {};
+    for (const w of p.weeksSpan) {
+      forecastLoad[p.team][w] = (forecastLoad[p.team][w]||0) + p.hours;
+    }
+  }
+
+  // ---- CHART ----
+  const baselinePcts = weeks.map(w => {
+    const d = baseline[selectedTeam]?.[w];
+    return d && d.avail>0 ? +(d.util/d.avail*100).toFixed(1) : null;
+  });
+  const forecastPcts = weeks.map(w => {
+    const d = baseline[selectedTeam]?.[w];
+    if (!d || d.avail===0) return null;
+    const extra = forecastLoad[selectedTeam]?.[w] || 0;
+    return +((d.util+extra)/d.avail*100).toFixed(1);
+  });
+
+  const shortWeeks = weeks.map(w=>w.replace('2026 ',''));
+  if (scenarioChart) scenarioChart.destroy();
+  const ctx = document.getElementById('scenario-chart').getContext('2d');
+  scenarioChart = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels: shortWeeks,
+      datasets:[
+        { label:'Baseline', data:baselinePcts, borderColor:'#4f8ef7', backgroundColor:'#4f8ef722', tension:0.4, borderWidth:2, pointRadius:3, spanGaps:true },
+        { label:'With Forecast', data:forecastPcts, borderColor:'#ef4444', backgroundColor:'#ef444422', borderDash:[6,4], tension:0.4, borderWidth:2, pointRadius:4, spanGaps:true }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},
+        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}
+      },
+      scales:{
+        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},
+        y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'},
+           annotations:{ overutil:{ type:'line',yMin:85,yMax:85,borderColor:'#f97316',borderWidth:1,borderDash:[4,4] } }}
+      }
+    }
+  });
+
+  // ---- BOTTLENECK TABLE + ALERTS ----
+  const bottlenecks = [];
+  for (const t of ALL_TEAMS) {
+    for (const w of weeks) {
+      const d = baseline[t]?.[w];
+      if (!d || d.avail===0) continue;
+      const extra = forecastLoad[t]?.[w] || 0;
+      if (extra===0) continue;
+      const basePct = d.util/d.avail*100;
+      const projPct = (d.util+extra)/d.avail*100;
+      if (projPct>85) {
+        bottlenecks.push({ team:t, week:w, basePct, extra, projPct });
+      }
+    }
+  }
+
+  // Alerts
+  const alerts = [];
+  const criticalTeams = {};
+  const warnTeams = {};
+  for (const b of bottlenecks) {
+    if (b.projPct>95) { if(!criticalTeams[b.team]) criticalTeams[b.team]=[]; criticalTeams[b.team].push(b); }
+    else if (b.projPct>85) { if(!warnTeams[b.team]) warnTeams[b.team]=[]; warnTeams[b.team].push(b); }
+  }
+
+  let alertHtml = '';
+  for (const [t,bs] of Object.entries(criticalTeams)) {
+    alertHtml += `<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Projected to exceed 95% in ${bs.length} week(s) — ${bs.map(b=>b.week.replace('2026 ','')).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
+  }
+  for (const [t,bs] of Object.entries(warnTeams)) {
+    alertHtml += `<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">Projected between 85–95% in ${bs.length} week(s) — ${bs.map(b=>b.week.replace('2026 ','')).join(', ')}.</div></div></div>`;
+  }
+  document.getElementById('alert-container').innerHTML = bottlenecks.length
+    ? `<div class="alert-list">${alertHtml}</div>`
+    : (forecastProjects.length ? '<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div><div class="alert-body">All teams remain below 85% with the forecasted projects added.</div></div></div></div>' : '');
+
+  // Table
+  const tbody = document.getElementById('bottleneck-body');
+  if (!bottlenecks.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">${forecastProjects.length ? 'No weeks exceed 85% threshold.' : 'Add a forecasted project to see bottleneck analysis.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = bottlenecks.sort((a,b)=>b.projPct-a.projPct).map(b=>`
+    <tr>
+      <td style="font-weight:600">${b.team}</td>
+      <td class="mono">${b.week.replace('2026 ','')}</td>
+      <td>${utilBar(b.basePct)}</td>
+      <td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td>
+      <td>${utilBar(b.projPct)}</td>
+      <td>${getBadge(b.projPct)}</td>
+    </tr>`).join('');
+}
+
+// ===================== CHART HELPER =====================
+function drawLineChart(canvasId, labels, datasets, existing, setter) {
+  if (existing) existing.destroy();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  setter(new Chart(ctx, {
+    type:'line',
+    data:{ labels: labels.map(w=>w.replace('2026 ','')), datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{labels:{color:'#e8eaf0',font:{family:'Syne',size:11},boxWidth:12}},
+        tooltip:{ callbacks:{ label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}` } }
+      },
+      scales:{
+        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},
+        y:{min:0,max:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}
+      }
+    }
+  }));
+}
+
+function sortTeamTable(col) {}
+
+// ===================== KICK OFF =====================
+
+// ── AI panel state ──────────────────────────────────────────────────────────
+let aiConversationHistory = [];
+
+function setPrompt(text) {
+  document.getElementById('ai-input').value = text;
+  document.getElementById('ai-input').focus();
+}
+
+function appendAiMessage(role, content, isLoading = false) {
+  const container = document.getElementById('ai-messages');
+  const div = document.createElement('div');
+  div.className = `ai-msg ai-msg-${role}`;
+  if (isLoading) div.id = 'ai-loading-msg';
+  div.innerHTML = `<div class="ai-msg-bubble">${isLoading ? '<span class="ai-typing">●●●</span>' : content.replace(/\n/g, '<br>')}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function removeLoadingMsg() {
+  const el = document.getElementById('ai-loading-msg');
+  if (el) el.remove();
+}
+
+async function sendAiMessage() {
+  const input = document.getElementById('ai-input');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  appendAiMessage('user', text);
+  aiConversationHistory.push({ role: 'user', content: text });
+
+  // Loading indicator
+  appendAiMessage('assistant', '', true);
+
+  try {
+    // Build a context summary of the current data to inject into system prompt
+    const weeks  = ALL_WEEKS.length;
+    const teams  = ALL_TEAMS.length;
+    const engs   = [...new Set(RAW.engineers.map(e => e.name))].length;
+    const teamSummary = ALL_TEAMS.map(t => {
+      const rows = RAW.teams.filter(r => r.team === t);
+      const totalAvail = rows.reduce((s, r) => s + r.available_hours, 0);
+      const totalUtil  = rows.reduce((s, r) => s + r.utilized_hours, 0);
+      const pct = totalAvail > 0 ? (totalUtil / totalAvail * 100).toFixed(0) : '0';
+      return `${t}: avg ${pct}% utilised`;
+    }).join('; ');
+
+    // Include the last 4 weeks of team data as context
+    const recentWeeks = ALL_WEEKS.slice(-4);
+    const recentContext = recentWeeks.map(w => {
+      const rows = RAW.teams.filter(r => r.week === w && r.available_hours > 0);
+      return `${w}: ` + rows.map(r => `${r.team} ${(r.utilized_hours/r.available_hours*100).toFixed(0)}%`).join(', ');
+    }).join('\n');
+
+    // Weekly team data for the full period (compact)
+    const fullDataStr = JSON.stringify(RAW.teams.map(r => ({
+      w: r.week.replace('2026 ',''),
+      t: r.team,
+      a: Math.round(r.available_hours),
+      u: Math.round(r.utilized_hours),
+    })));
+
+    const systemPrompt = `You are a resource planning expert assistant with direct access to this company's real-time Resource Guru utilisation data.
+
+DATA SUMMARY:
+- Period: ${ALL_WEEKS[0]} to ${ALL_WEEKS[ALL_WEEKS.length-1]} (${weeks} weeks)
+- Teams: ${teams} | Engineers: ${engs}
+- Team avg utilisation: ${teamSummary}
+
+RECENT WEEKS (last 4):
+${recentContext}
+
+FULL WEEKLY TEAM DATA (week, team, available_hours, utilized_hours):
+${fullDataStr}
+
+Guidelines:
+- Answer concisely and specifically using the data above
+- Flag weeks where any team exceeds 85% utilisation (busy) or 95% (critical)
+- When suggesting project windows, confirm capacity with specific numbers
+- Use week numbers (W14, W15...) when referencing specific weeks
+- Format lists and key findings clearly`;
+
+    const response = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system:   systemPrompt,
+        messages: aiConversationHistory,
+      }),
+    });
+
+    const data = await response.json();
+    removeLoadingMsg();
+
+    if (!response.ok || data.error) {
+      appendAiMessage('assistant', `⚠️ Error: ${data.error || 'Unknown error'}`);
+      aiConversationHistory.pop(); // remove the user message that failed
+      return;
+    }
+
+    const reply = data.content?.[0]?.text || 'No response';
+    aiConversationHistory.push({ role: 'assistant', content: reply });
+    appendAiMessage('assistant', reply);
+
+    // Trim history to last 10 exchanges (20 messages) to stay within token limits
+    if (aiConversationHistory.length > 20) {
+      aiConversationHistory = aiConversationHistory.slice(-20);
+    }
+  } catch (err) {
+    removeLoadingMsg();
+    appendAiMessage('assistant', `⚠️ Network error: ${err.message}`);
+  }
+}
+
+// ── Status indicator ──────────────────────────────────────────────────────────
+function setStatus(state, text) {
+  const dot  = document.getElementById('status-dot');
+  const span = document.getElementById('status-text');
+  if (!dot || !span) return;
+  span.textContent = text;
+  const colors = { loading: '#f59e0b', ok: '#22c55e', error: '#ef4444' };
+  dot.style.background = colors[state] || '#6b7280';
+}
+
+// ── Live data loading ─────────────────────────────────────────────────────────
+async function loadLiveData() {
+  setStatus('loading', 'Fetching from Resource Guru...');
+  try {
+    const res = await fetch('/api/utilisation');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    RAW = data;
+    window.RAW = RAW; // expose globally for debugging
+
+    setStatus('ok', `Live · ${new Date(data.meta?.fetched_at || Date.now()).toLocaleTimeString()}`);
+
+    // Update AI data info panel
+    const infoEl = document.getElementById('ai-data-info');
+    if (infoEl) {
+      const engs  = [...new Set(RAW.engineers.map(e => e.name))].length;
+      const weeks = [...new Set(RAW.teams.map(r => r.week))].sort();
+      infoEl.textContent = `${engs} engineers · ${[...new Set(RAW.teams.map(r => r.team))].length} teams · ${weeks.length} weeks (${weeks[0]?.replace('2026 ','')} – ${weeks[weeks.length-1]?.replace('2026 ','')})`;
+    }
+
+    init();
+
+    // Auto-refresh every 15 minutes
+    setTimeout(loadLiveData, parseInt('900000'));
+  } catch (err) {
+    setStatus('error', 'Failed to load live data');
+    console.error('loadLiveData error:', err);
+
+    // If the proxy is not running, show a helpful message in the dashboard
+    const kpiGrid = document.getElementById('kpi-grid');
+    if (kpiGrid) {
+      kpiGrid.innerHTML = `<div class="chart-card" style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)">
+        <div style="font-size:20px;margin-bottom:12px">⚠️</div>
+        <div style="font-weight:700;margin-bottom:8px">Could not connect to proxy server</div>
+        <div style="font-size:13px">Make sure the server is running: <code style="background:var(--surface2);padding:2px 8px;border-radius:4px">npm start</code></div>
+        <div style="font-size:12px;margin-top:8px;color:#4f8ef7;cursor:pointer" onclick="loadLiveData()">↻ Retry</div>
+      </div>`;
+    }
+  }
+}
+
+// Boot
+loadLiveData();
+</script>
+<!-- AI INSIGHTS PAGE -->
+<div class="page" id="page-ai">
+  <div class="page-header">
+    <div>
+      <div class="page-title">🤖 AI Insights</div>
+      <div class="page-subtitle">Ask Claude about your resource data, forecasts, and capacity planning</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">
+
+    <!-- Chat area -->
+    <div class="chart-card" style="display:flex;flex-direction:column;height:600px">
+      <div id="ai-messages" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-bottom:8px">
+        <div class="ai-msg ai-msg-assistant">
+          <div class="ai-msg-bubble">
+            👋 Hi! I have access to your full Resource Guru utilisation data.
+            Ask me anything — bottleneck analysis, capacity windows, headcount recommendations, project timing, and more.
+          </div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px;display:flex;gap:10px">
+        <input
+          id="ai-input"
+          class="form-input"
+          style="flex:1"
+          placeholder="e.g. Which teams are at risk of bottlenecks this summer?"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAiMessage()}"
+        />
+        <button class="btn btn-primary" style="width:80px;padding:9px 0" onclick="sendAiMessage()">Send</button>
+      </div>
+    </div>
+
+    <!-- Quick prompts panel -->
+    <div>
+      <div class="form-card">
+        <div class="form-title">Quick Prompts</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('Which teams are projected to exceed 85% utilisation in the next 8 weeks?')">
+            🔥 Bottleneck scan — next 8 weeks
+          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('Which weeks have the most spare capacity across all teams? I want to find a good window to start a new project.')">
+            📅 Best window for a new project
+          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('Summarise overall utilisation health across all teams. Flag any critical concerns.')">
+            📊 Overall health summary
+          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('Which individual engineers have the most spare capacity? List the top 5 least-utilised engineers who could take on more work.')">
+            👤 Under-utilised engineers
+          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('If I need 40 hours/week from the PLC team and 20 hours/week from the Electrical Installation team for a 10-week project, when is the safest time to start?')">
+            ⚡ Project capacity check
+          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
+            onclick="setPrompt('Compare the Service team vs the PLC team utilisation trends over the next 3 months. Which is more at risk?')">
+            ⚖️ Compare two teams
+          </button>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Data snapshot</div>
+          <div id="ai-data-info" style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;line-height:1.7">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
