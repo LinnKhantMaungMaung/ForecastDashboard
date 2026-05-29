@@ -133,23 +133,6 @@ app.get('/api/utilisation', async (req, res) => {
  *   messages: [{ role: "user"|"assistant", content: string }]
  * }
  */
-app.post('/api/claude', async (req, res) => {
-  const { messages, system } = req.body;
-
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array required' });
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
-  }
-
-  try {
-    const payload = {
-      model:      'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      messages,
-    };
     if (system) payload.system = system;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
