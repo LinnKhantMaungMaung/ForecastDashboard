@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -246,6 +245,42 @@
   }
   @keyframes blink { 0%,100%{opacity:.3} 50%{opacity:1} }
   .ai-typing { letter-spacing: 4px; animation: blink 1.2s infinite; }
+
+  /* ── Settings panel ── */
+  .settings-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    z-index: 200; backdrop-filter: blur(2px);
+  }
+  .settings-overlay.open { display: block; }
+  .settings-panel {
+    position: fixed; top: 0; right: -420px; width: 420px; height: 100vh;
+    background: var(--surface); border-left: 1px solid var(--border);
+    z-index: 201; transition: right .25s ease; overflow-y: auto; padding: 28px 24px;
+  }
+  .settings-panel.open { right: 0; }
+  .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .settings-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px; }
+  .settings-close:hover { color: var(--text); }
+  .settings-section { margin-bottom: 24px; }
+  .settings-section-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .settings-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-row-label { font-size: 13px; font-weight: 600; }
+  .settings-row-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  /* Toggle switch */
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; cursor: pointer; inset: 0; background: var(--border);
+    border-radius: 22px; transition: .2s;
+  }
+  .toggle-slider:before {
+    content: ''; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: white; border-radius: 50%; transition: .2s;
+  }
+  input:checked + .toggle-slider { background: var(--accent); }
+  input:checked + .toggle-slider:before { transform: translateX(18px); }
+  .settings-note { font-size: 11px; color: var(--muted); background: var(--surface2); border-radius: 8px; padding: 10px 12px; margin-top: 12px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -259,7 +294,8 @@
     <div class="nav-tab" onclick="showPage('scenario')">⚡ Scenario Planner</div>
     <div class="nav-tab" id="ai-nav-tab" onclick="showPage('ai')">🤖 AI Insights</div>
   </div>
-  <div id="data-status" style="margin-left:auto;padding:0 20px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
+  <button onclick="toggleSettings()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'Syne',sans-serif;font-weight:600;transition:all .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">⚙️ Settings</button>
+  <div id="data-status" style="margin-left:8px;padding:0 20px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
     <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block"></span>
     <span id="status-text">Loading...</span>
   </div>
@@ -397,47 +433,80 @@
   <div class="page-header">
     <div>
       <div class="page-title">⚡ Scenario Planner</div>
-      <div class="page-subtitle">Model forecasted projects and identify resource bottlenecks</div>
+      <div class="page-subtitle">Model multi-team projects with overlapping phases and identify resource bottlenecks</div>
+    </div>
+    <div class="controls">
+      <div class="pill-group" id="scenario-view-toggle">
+        <div class="pill active" onclick="setScenarioView('utilisation')">📈 Utilisation</div>
+        <div class="pill" onclick="setScenarioView('gantt')">📊 Gantt</div>
+      </div>
     </div>
   </div>
 
   <div class="scenario-layout">
-    <!-- LEFT: Add project form -->
+    <!-- LEFT: Project builder -->
     <div>
       <div class="form-card">
-        <div class="form-title">Add Forecasted Project</div>
+        <div class="form-title">Project Setup</div>
+
         <div class="form-group">
           <label class="form-label">Project Name</label>
           <input class="form-input" id="proj-name" placeholder="e.g. Amazon DRH5">
         </div>
+
+        <div class="form-row">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Project Start Date</label>
+            <input class="form-input" id="proj-start-date" type="date">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">Project End Date</label>
+            <input class="form-input" id="proj-end-date" type="date">
+          </div>
+        </div>
+
+        <div style="height:16px"></div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Team Phases</div>
+
+        <div id="phase-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+          <!-- Phases added dynamically -->
+        </div>
+
+        <button class="btn" style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);margin-bottom:12px" onclick="addPhase()">+ Add Team Phase</button>
+
+        <div style="height:8px;border-top:1px solid var(--border);margin-bottom:12px"></div>
+        <button class="btn btn-primary" onclick="addProject()">Add to Scenario</button>
+      </div>
+
+      <!-- Saved projects -->
+      <div class="project-list" id="project-list" style="margin-top:12px">
+        <div class="empty" style="padding:24px">No projects yet. Add one above.</div>
+      </div>
+      <div style="margin-top:12px" id="clear-btn-wrap" style="display:none">
+        <button class="btn btn-danger" onclick="clearProjects()">Clear All Projects</button>
+      </div>
+
+      <!-- Add Person to Team -->
+      <div class="form-card" style="margin-top:16px">
+        <div class="form-title">👤 Add Person to Team</div>
         <div class="form-group">
           <label class="form-label">Team</label>
-          <select class="form-input" id="proj-team" style="cursor:pointer"></select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Hours per Week</label>
-          <input class="form-input" id="proj-hours" type="number" min="1" max="400" placeholder="e.g. 40">
+          <select class="form-input" id="addperson-team" style="cursor:pointer"></select>
         </div>
         <div class="form-row">
           <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">Start Week</label>
-            <select class="form-input" id="proj-start" style="cursor:pointer"></select>
+            <label class="form-label">People to Add</label>
+            <input class="form-input" id="addperson-count" type="number" min="1" max="20" value="1">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">End Week</label>
-            <select class="form-input" id="proj-end" style="cursor:pointer"></select>
+            <label class="form-label">Hours/Week Each</label>
+            <input class="form-input" id="addperson-hours" type="number" min="1" max="60" value="40">
           </div>
         </div>
-        <div style="height:16px"></div>
-        <button class="btn btn-primary" onclick="addProject()">+ Add to Scenario</button>
-      </div>
-
-      <div class="project-list" id="project-list">
-        <div class="empty" style="padding:24px">No forecasted projects yet.<br>Add one above to model the impact.</div>
-      </div>
-
-      <div style="margin-top:12px" id="clear-btn-wrap" style="display:none">
-        <button class="btn btn-danger" onclick="clearProjects()">Clear All Projects</button>
+        <div style="height:12px"></div>
+        <button class="btn btn-primary" onclick="applyAddPerson()">Apply to Forecast</button>
+        <button class="btn" style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)" onclick="clearAddPerson()">Clear</button>
+        <div id="addperson-status" style="font-size:12px;color:var(--muted);margin-top:8px;font-family:'DM Mono',monospace"></div>
       </div>
     </div>
 
@@ -445,12 +514,13 @@
     <div>
       <div id="alert-container"></div>
 
-      <div id="scenario-chart-wrap">
+      <!-- Utilisation view -->
+      <div id="scenario-utilisation-view">
         <div class="chart-card">
           <div class="chart-card-header">
             <div>
               <div class="chart-card-title">Projected vs Actual Utilisation</div>
-              <div class="chart-card-subtitle">Baseline (solid) + forecasted load (dashed). Select team to inspect.</div>
+              <div class="chart-card-subtitle">Baseline (solid) + forecasted load (dashed)</div>
             </div>
             <select id="scenario-team-select" onchange="renderScenario()" style="min-width:180px"></select>
           </div>
@@ -458,32 +528,44 @@
             <canvas id="scenario-chart"></canvas>
           </div>
         </div>
+      </div>
 
-        <div class="table-card">
-          <div class="table-header">
-            <div class="table-title">Bottleneck Summary — All Teams</div>
+      <!-- Gantt view -->
+      <div id="scenario-gantt-view" style="display:none">
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <div>
+              <div class="chart-card-title">Project Timeline (Gantt)</div>
+              <div class="chart-card-subtitle">Team phases — width = duration, overlap = concurrent work</div>
+            </div>
           </div>
-          <div style="overflow-x:auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Team</th>
-                  <th>Week</th>
-                  <th>Baseline Util%</th>
-                  <th>Forecast Load (hrs)</th>
-                  <th>Projected Util%</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="bottleneck-body">
-                <tr><td colspan="6" class="empty">Add a forecasted project to see bottleneck analysis.</td></tr>
-              </tbody>
-            </table>
-          </div>
+          <div id="gantt-container" style="overflow-x:auto;min-height:120px"></div>
+        </div>
+      </div>
+
+      <!-- Bottleneck table (always shown) -->
+      <div class="table-card">
+        <div class="table-header">
+          <div class="table-title">Bottleneck Summary — All Teams</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Team</th><th>Week</th><th>Baseline Util%</th>
+                <th>Forecast Load (hrs)</th><th>Projected Util%</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="bottleneck-body">
+              <tr><td colspan="6" class="empty">Add a project to see bottleneck analysis.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   </div>
+</div>
+
 </div>
 
 <script>
@@ -526,7 +608,14 @@ function populateSelects() {
   const wf = document.getElementById('week-range-from');
   const wt = document.getElementById('week-range-to');
   wf.innerHTML = weekOpts; wt.innerHTML = weekOpts;
-  wf.value = ALL_WEEKS[0]; wt.value = ALL_WEEKS[ALL_WEEKS.length-1];
+  // Always default to the full available range
+  wf.value = ALL_WEEKS[0];
+  wt.value = ALL_WEEKS[ALL_WEEKS.length - 1];
+  // Sync heatmap and engineer selects too
+  const hef = document.getElementById('eng-week-from');
+  const het = document.getElementById('eng-week-to');
+  if (hef) { hef.innerHTML = weekOpts; hef.value = ALL_WEEKS[0]; }
+  if (het) { het.innerHTML = weekOpts; het.value = ALL_WEEKS[ALL_WEEKS.length - 1]; }
 
   // Heatmap
   document.getElementById('heatmap-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
@@ -986,7 +1075,538 @@ function sortTeamTable(col) {}
 
 // ===================== KICK OFF =====================
 
-// ── AI panel state ──────────────────────────────────────────────────────────
+// ── Settings state ────────────────────────────────────────────────────────────
+let SETTINGS = {
+  confirmed: true, tentative: false,
+  employees: true, contractors: true,
+  directors: true, managers: true, staff: true,
+};
+
+function toggleSettings() {
+  document.getElementById('settings-panel').classList.toggle('open');
+  document.getElementById('settings-overlay').classList.toggle('open');
+}
+
+function applySettings() {
+  SETTINGS = {
+    confirmed:   document.getElementById('s-confirmed').checked,
+    tentative:   document.getElementById('s-tentative').checked,
+    employees:   document.getElementById('s-employees').checked,
+    contractors: document.getElementById('s-contractors').checked,
+    directors:   document.getElementById('s-directors').checked,
+    managers:    document.getElementById('s-managers').checked,
+    staff:       document.getElementById('s-staff').checked,
+  };
+  // Re-render all active views
+  renderUtilisation();
+  renderHeatmap();
+  if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
+  renderScenario();
+}
+
+// Filter RAW data through settings
+function getFilteredTeams() {
+  // Build a set of excluded engineer names based on settings
+  const excluded = new Set();
+  for (const e of RAW.engineer_list || []) {
+    if (!SETTINGS.employees && !e.isContractor) { excluded.add(e.name); continue; }
+    if (!SETTINGS.contractors && e.isContractor) { excluded.add(e.name); continue; }
+    if (!SETTINGS.directors && e.seniority === 'director') { excluded.add(e.name); continue; }
+    if (!SETTINGS.managers && e.seniority === 'manager') { excluded.add(e.name); continue; }
+    if (!SETTINGS.staff && e.seniority === 'staff') { excluded.add(e.name); continue; }
+  }
+
+  // Re-aggregate teams from engineers, applying exclusions and tentative toggle
+  const teamsMap = {};
+  for (const r of RAW.engineers) {
+    if (excluded.has(r.name)) continue;
+    const teamKey = `${r.team}|${r.week}`;
+    if (!teamsMap[teamKey]) {
+      teamsMap[teamKey] = { week: r.week, team: r.team, available_hours: 0, utilized_hours: 0, tentative_hours: 0, headcount: 0, _hc: new Set() };
+    }
+    teamsMap[teamKey].available_hours += r.available_hours;
+    teamsMap[teamKey].utilized_hours  += (SETTINGS.confirmed ? r.utilized_hours : 0);
+    teamsMap[teamKey].tentative_hours += (SETTINGS.tentative ? (r.tentative_hours || 0) : 0);
+    teamsMap[teamKey]._hc.add(r.name);
+  }
+
+  return Object.values(teamsMap).map(({ _hc, ...rest }) => ({
+    ...rest,
+    utilized_hours: rest.utilized_hours + rest.tentative_hours,
+    headcount: _hc.size,
+  }));
+}
+
+function getFilteredEngineers() {
+  const excluded = new Set();
+  for (const e of RAW.engineer_list || []) {
+    if (!SETTINGS.employees && !e.isContractor) { excluded.add(e.name); continue; }
+    if (!SETTINGS.contractors && e.isContractor) { excluded.add(e.name); continue; }
+    if (!SETTINGS.directors && e.seniority === 'director') { excluded.add(e.name); continue; }
+    if (!SETTINGS.managers && e.seniority === 'manager') { excluded.add(e.name); continue; }
+    if (!SETTINGS.staff && e.seniority === 'staff') { excluded.add(e.name); continue; }
+  }
+  return RAW.engineers.filter(e => !excluded.has(e.name)).map(e => ({
+    ...e,
+    utilized_hours: (SETTINGS.confirmed ? e.utilized_hours : 0) + (SETTINGS.tentative ? (e.tentative_hours || 0) : 0),
+  }));
+}
+
+// ── Scenario planner state ────────────────────────────────────────────────────
+let forecastProjects = [];
+let addPersonForecast = null; // { team, count, hoursPerWeek }
+let scenarioViewMode = 'utilisation'; // 'utilisation' | 'gantt'
+let phaseCounter = 0;
+
+function setScenarioView(mode) {
+  scenarioViewMode = mode;
+  document.querySelectorAll('#scenario-view-toggle .pill').forEach((p, i) => {
+    p.classList.toggle('active', (i===0&&mode==='utilisation')||(i===1&&mode==='gantt'));
+  });
+  document.getElementById('scenario-utilisation-view').style.display = mode === 'utilisation' ? 'block' : 'none';
+  document.getElementById('scenario-gantt-view').style.display = mode === 'gantt' ? 'block' : 'none';
+  renderScenario();
+}
+
+// Add a phase row to the project builder
+function addPhase() {
+  phaseCounter++;
+  const id = phaseCounter;
+  const teams = ALL_TEAMS.map(t => `<option value="${t}">${t}</option>`).join('');
+  const div = document.createElement('div');
+  div.id = `phase-${id}`;
+  div.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
+  div.innerHTML = `
+    <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <div class="form-label">Team</div>
+        <select class="form-input" id="phase-team-${id}" style="cursor:pointer">${teams}</select>
+      </div>
+      <div>
+        <div class="form-label">Hours/Week</div>
+        <input class="form-input" id="phase-hours-${id}" type="number" min="1" max="500" placeholder="e.g. 80">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <div class="form-label">Start</div>
+        <select class="form-input" id="phase-start-type-${id}" onchange="togglePhaseStart(${id})" style="cursor:pointer">
+          <option value="offset">Week offset</option>
+          <option value="date">Specific date</option>
+          <option value="with">Same time as…</option>
+        </select>
+      </div>
+      <div id="phase-start-input-${id}">
+        <div class="form-label">Offset (weeks)</div>
+        <input class="form-input" id="phase-offset-${id}" type="number" min="0" value="0" placeholder="0 = project start">
+      </div>
+      <div>
+        <div class="form-label">Duration</div>
+        <div style="display:flex;gap:4px">
+          <input class="form-input" id="phase-dur-${id}" type="number" min="1" value="4" style="flex:1">
+          <select class="form-input" id="phase-dur-unit-${id}" style="cursor:pointer;width:auto;padding:9px 8px">
+            <option value="weeks">wks</option>
+            <option value="days">days</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="phase-with-select-${id}" style="display:none">
+      <div class="form-label">Start together with phase</div>
+      <select class="form-input" id="phase-with-${id}" style="cursor:pointer">
+        <option value="">— select phase —</option>
+      </select>
+    </div>`;
+  document.getElementById('phase-list').appendChild(div);
+  updateWithOptions();
+}
+
+function removePhase(id) {
+  document.getElementById(`phase-${id}`)?.remove();
+  updateWithOptions();
+}
+
+function togglePhaseStart(id) {
+  const type = document.getElementById(`phase-start-type-${id}`).value;
+  const inputDiv = document.getElementById(`phase-start-input-${id}`);
+  const withDiv  = document.getElementById(`phase-with-select-${id}`);
+  if (type === 'offset') {
+    inputDiv.innerHTML = '<div class="form-label">Offset (weeks)</div><input class="form-input" id="phase-offset-' + id + '" type="number" min="0" value="0">';
+    withDiv.style.display = 'none';
+  } else if (type === 'date') {
+    inputDiv.innerHTML = '<div class="form-label">Start Date</div><input class="form-input" id="phase-offset-' + id + '" type="date">';
+    withDiv.style.display = 'none';
+  } else {
+    inputDiv.innerHTML = '';
+    withDiv.style.display = 'block';
+  }
+}
+
+function updateWithOptions() {
+  const phases = [...document.querySelectorAll('[id^="phase-"]')].filter(el => el.id.match(/^phase-\d+$/));
+  phases.forEach(phaseEl => {
+    const id = phaseEl.id.replace('phase-', '');
+    const sel = document.getElementById(`phase-with-${id}`);
+    if (!sel) return;
+    const others = phases.filter(p => p.id !== `phase-${id}`);
+    sel.innerHTML = '<option value="">— select phase —</option>' +
+      others.map(p => {
+        const pid = p.id.replace('phase-','');
+        const team = document.getElementById(`phase-team-${pid}`)?.value || `Phase ${pid}`;
+        return `<option value="${pid}">Phase ${pid} (${team})</option>`;
+      }).join('');
+  });
+}
+
+function addProject() {
+  const name = document.getElementById('proj-name').value.trim();
+  const startDate = document.getElementById('proj-start-date').value;
+  const endDate   = document.getElementById('proj-end-date').value;
+  if (!name) { alert('Enter a project name'); return; }
+  if (!startDate) { alert('Enter a project start date'); return; }
+
+  // Collect phases
+  const phaseEls = [...document.querySelectorAll('[id^="phase-"]')].filter(el => el.id.match(/^phase-\d+$/));
+  if (phaseEls.length === 0) { alert('Add at least one team phase'); return; }
+
+  const phases = [];
+  const projectStartMs = new Date(startDate).getTime();
+
+  // First pass: compute absolute start dates
+  const phaseAbsoluteStarts = {};
+  phaseEls.forEach(phaseEl => {
+    const id = phaseEl.id.replace('phase-', '');
+    const team    = document.getElementById(`phase-team-${id}`)?.value;
+    const hours   = parseFloat(document.getElementById(`phase-hours-${id}`)?.value || 0);
+    const durVal  = parseFloat(document.getElementById(`phase-dur-${id}`)?.value || 1);
+    const durUnit = document.getElementById(`phase-dur-unit-${id}`)?.value || 'weeks';
+    const durWeeks = durUnit === 'days' ? durVal / 5 : durVal;
+    const startType = document.getElementById(`phase-start-type-${id}`)?.value || 'offset';
+
+    let phaseStartMs = projectStartMs;
+    if (startType === 'offset') {
+      const offsetWeeks = parseFloat(document.getElementById(`phase-offset-${id}`)?.value || 0);
+      phaseStartMs = projectStartMs + offsetWeeks * 7 * 24 * 3600 * 1000;
+    } else if (startType === 'date') {
+      const dateVal = document.getElementById(`phase-offset-${id}`)?.value;
+      if (dateVal) phaseStartMs = new Date(dateVal).getTime();
+    } else if (startType === 'with') {
+      const withId = document.getElementById(`phase-with-${id}`)?.value;
+      phaseAbsoluteStarts[id] = { waitFor: withId, durWeeks, team, hours };
+      return;
+    }
+    phaseAbsoluteStarts[id] = { startMs: phaseStartMs, durWeeks, team, hours };
+  });
+
+  // Second pass: resolve "same as" references
+  Object.entries(phaseAbsoluteStarts).forEach(([id, p]) => {
+    if (p.waitFor) {
+      const ref = phaseAbsoluteStarts[p.waitFor];
+      phaseAbsoluteStarts[id].startMs = ref?.startMs || projectStartMs;
+    }
+  });
+
+  // Build week-level arrays for each phase
+  Object.entries(phaseAbsoluteStarts).forEach(([id, p]) => {
+    if (!p.team || !p.hours) return;
+    const weeksSpan = [];
+    let cur = new Date(p.startMs);
+    const totalWeeks = Math.ceil(p.durWeeks);
+    for (let i = 0; i < totalWeeks; i++) {
+      weeksSpan.push(toWeekLabel(cur));
+      cur.setDate(cur.getDate() + 7);
+    }
+    phases.push({ id, team: p.team, hours: p.hours, weeksSpan,
+      startDate: new Date(p.startMs).toISOString().slice(0,10),
+      durWeeks: p.durWeeks });
+  });
+
+  forecastProjects.push({ id: Date.now(), name, startDate, endDate, phases });
+  document.getElementById('proj-name').value = '';
+  document.getElementById('phase-list').innerHTML = '';
+  phaseCounter = 0;
+  renderProjectList();
+  renderScenario();
+}
+
+function removeProject(id) {
+  forecastProjects = forecastProjects.filter(p => p.id !== id);
+  renderProjectList();
+  renderScenario();
+}
+
+function clearProjects() {
+  forecastProjects = [];
+  renderProjectList();
+  renderScenario();
+}
+
+function applyAddPerson() {
+  const team  = document.getElementById('addperson-team').value;
+  const count = parseInt(document.getElementById('addperson-count').value || 1);
+  const hours = parseFloat(document.getElementById('addperson-hours').value || 40);
+  addPersonForecast = { team, count, hoursPerWeek: hours };
+  document.getElementById('addperson-status').textContent =
+    `Adding ${count} person(s) to ${team} (+${(count * hours).toFixed(0)}h/wk available)`;
+  renderScenario();
+}
+
+function clearAddPerson() {
+  addPersonForecast = null;
+  document.getElementById('addperson-status').textContent = '';
+  renderScenario();
+}
+
+function renderProjectList() {
+  const el = document.getElementById('project-list');
+  const cbWrap = document.getElementById('clear-btn-wrap');
+  if (!forecastProjects.length) {
+    el.innerHTML = '<div class="empty" style="padding:24px">No projects yet.</div>';
+    if (cbWrap) cbWrap.style.display = 'none';
+    return;
+  }
+  if (cbWrap) cbWrap.style.display = 'block';
+  el.innerHTML = forecastProjects.map(p => `
+    <div class="project-chip">
+      <div>
+        <div class="project-chip-name">${p.name}</div>
+        <div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s): ${p.phases.map(ph => ph.team + ' ' + ph.hours + 'h/wk').join(', ')}</div>
+      </div>
+      <button class="chip-remove" onclick="removeProject(${p.id})">×</button>
+    </div>`).join('');
+}
+
+// ── Gantt renderer ────────────────────────────────────────────────────────────
+function renderGantt() {
+  const container = document.getElementById('gantt-container');
+  if (!forecastProjects.length) {
+    container.innerHTML = '<div class="empty">Add a project to see the Gantt chart.</div>';
+    return;
+  }
+
+  const allWeeksSet = new Set();
+  forecastProjects.forEach(p => p.phases.forEach(ph => ph.weeksSpan.forEach(w => allWeeksSet.add(w))));
+  const ganttWeeks = [...allWeeksSet].sort();
+  if (!ganttWeeks.length) return;
+
+  const palette = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399'];
+  let html = `<table style="border-collapse:separate;border-spacing:2px;min-width:100%">`;
+  html += `<thead><tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);background:transparent;white-space:nowrap">Project / Phase</th>`;
+  ganttWeeks.forEach(w => {
+    html += `<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:36px">${w.replace(/\d+ /,'')}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  forecastProjects.forEach((proj, pi) => {
+    html += `<tr><td colspan="${ganttWeeks.length + 1}" style="padding:8px 10px 4px;font-size:12px;font-weight:700;color:var(--text)">${proj.name}</td></tr>`;
+    proj.phases.forEach((phase, phi) => {
+      const color = palette[(pi * 3 + phi) % palette.length];
+      html += `<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${phase.team}</td>`;
+      ganttWeeks.forEach(w => {
+        const active = phase.weeksSpan.includes(w);
+        html += `<td style="height:28px;border-radius:4px;background:${active ? color + '55' : 'transparent'};border:${active ? '1px solid ' + color : '1px solid transparent'};text-align:center">`;
+        if (active) html += `<span style="font-size:9px;color:${color};font-family:'DM Mono',monospace">${phase.hours}h</span>`;
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+// ── Scenario planner main renderer ────────────────────────────────────────────
+function renderScenario() {
+  const filteredTeams = getFilteredTeams();
+  const weeks = ALL_WEEKS;
+
+  // Build baseline from filtered teams
+  const baseline = {};
+  for (const t of ALL_TEAMS) {
+    baseline[t] = {};
+    for (const w of weeks) baseline[t][w] = { avail: 0, util: 0 };
+  }
+  for (const r of filteredTeams) {
+    if (baseline[r.team] && baseline[r.team][r.week] !== undefined) {
+      baseline[r.team][r.week].avail += r.available_hours;
+      baseline[r.team][r.week].util  += r.utilized_hours;
+    }
+  }
+
+  // Apply add-person forecast (increases available hours)
+  if (addPersonForecast) {
+    const { team, count, hoursPerWeek } = addPersonForecast;
+    for (const w of weeks) {
+      if (baseline[team] && baseline[team][w]) {
+        baseline[team][w].avail += count * hoursPerWeek;
+      }
+    }
+  }
+
+  // Build forecast load from projects
+  const forecastLoad = {};
+  for (const proj of forecastProjects) {
+    for (const phase of proj.phases) {
+      if (!forecastLoad[phase.team]) forecastLoad[phase.team] = {};
+      for (const w of phase.weeksSpan) {
+        forecastLoad[phase.team][w] = (forecastLoad[phase.team][w] || 0) + phase.hours;
+      }
+    }
+  }
+
+  // Gantt
+  if (scenarioViewMode === 'gantt') { renderGantt(); }
+
+  // Utilisation chart
+  const selectedTeam = document.getElementById('scenario-team-select').value || ALL_TEAMS[0];
+  const baselinePcts = weeks.map(w => {
+    const d = baseline[selectedTeam]?.[w];
+    return d && d.avail > 0 ? +(d.util / d.avail * 100).toFixed(1) : null;
+  });
+  const forecastPcts = weeks.map(w => {
+    const d = baseline[selectedTeam]?.[w];
+    if (!d || d.avail === 0) return null;
+    const extra = forecastLoad[selectedTeam]?.[w] || 0;
+    return +((d.util + extra) / d.avail * 100).toFixed(1);
+  });
+
+  const shortWeeks = weeks.map(w => w.replace('2026 ', ''));
+  if (scenarioChart) scenarioChart.destroy();
+  const ctx = document.getElementById('scenario-chart').getContext('2d');
+  scenarioChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: shortWeeks,
+      datasets: [
+        { label: 'Baseline', data: baselinePcts, borderColor: '#4f8ef7', backgroundColor: '#4f8ef722', tension: 0.4, borderWidth: 2, pointRadius: 3, spanGaps: true },
+        { label: 'With Forecast', data: forecastPcts, borderColor: '#ef4444', backgroundColor: '#ef444422', borderDash: [6, 4], tension: 0.4, borderWidth: 2, pointRadius: 4, spanGaps: true },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#e8eaf0', font: { family: 'Syne' } } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw ?? '—'}%` } },
+      },
+      scales: {
+        x: { ticks: { color: '#6b7280', font: { family: 'DM Mono', size: 11 } }, grid: { color: '#2a2f3d' } },
+        y: { min: 0, ticks: { color: '#6b7280', callback: v => v + '%' }, grid: { color: '#2a2f3d' } },
+      },
+    },
+  });
+
+  // Bottleneck table
+  const bottlenecks = [];
+  for (const t of ALL_TEAMS) {
+    for (const w of weeks) {
+      const d = baseline[t]?.[w];
+      if (!d || d.avail === 0) continue;
+      const extra = forecastLoad[t]?.[w] || 0;
+      if (extra === 0 && !addPersonForecast) continue;
+      const basePct = d.util / d.avail * 100;
+      const projPct = (d.util + extra) / d.avail * 100;
+      if (projPct > 85) bottlenecks.push({ team: t, week: w, basePct, extra, projPct });
+    }
+  }
+
+  // Alerts
+  const critT = {}, warnT = {};
+  for (const b of bottlenecks) {
+    if (b.projPct > 95) { (critT[b.team] = critT[b.team] || []).push(b); }
+    else { (warnT[b.team] = warnT[b.team] || []).push(b); }
+  }
+  let alertHtml = '';
+  for (const [t, bs] of Object.entries(critT)) {
+    alertHtml += `<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} week(s): ${bs.map(b => b.week.replace('2026 ', '')).join(', ')}. Peak: ${Math.max(...bs.map(b => b.projPct)).toFixed(0)}%</div></div></div>`;
+  }
+  for (const [t, bs] of Object.entries(warnT)) {
+    alertHtml += `<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} week(s): ${bs.map(b => b.week.replace('2026 ', '')).join(', ')}.</div></div></div>`;
+  }
+  document.getElementById('alert-container').innerHTML = bottlenecks.length
+    ? `<div class="alert-list">${alertHtml}</div>`
+    : (forecastProjects.length || addPersonForecast ? '<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div><div class="alert-body">All teams remain below 85% with the current scenario.</div></div></div></div>' : '');
+
+  const tbody = document.getElementById('bottleneck-body');
+  if (!bottlenecks.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">${forecastProjects.length || addPersonForecast ? 'No weeks exceed 85%.' : 'Add a project to see bottleneck analysis.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = bottlenecks.sort((a, b) => b.projPct - a.projPct).map(b => `
+    <tr>
+      <td style="font-weight:600">${b.team}</td>
+      <td class="mono">${b.week.replace('2026 ', '')}</td>
+      <td>${utilBar(b.basePct)}</td>
+      <td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td>
+      <td>${utilBar(b.projPct)}</td>
+      <td>${getBadge(b.projPct)}</td>
+    </tr>`).join('');
+}
+
+// ── Override aggregateTeamWeekly to use filtered data ─────────────────────────
+function aggregateTeamWeekly(teamFilter, weeks) {
+  const filteredTeams = getFilteredTeams();
+  const data = {};
+  const teams = teamFilter === 'ALL' ? ALL_TEAMS : [teamFilter];
+  for (const t of teams) {
+    data[t] = {};
+    for (const w of weeks) data[t][w] = { avail: 0, util: 0 };
+  }
+  for (const r of filteredTeams) {
+    if (!weeks.includes(r.week)) continue;
+    if (teamFilter !== 'ALL' && r.team !== teamFilter) continue;
+    if (!data[r.team]) continue;
+    data[r.team][r.week].avail += r.available_hours;
+    data[r.team][r.week].util  += r.utilized_hours;
+  }
+  return data;
+}
+
+// Override renderEngineers to use filtered engineers
+const _origRenderEngineers = renderEngineers;
+function renderEngineers() {
+  const teamFilter = document.getElementById('eng-team-filter').value;
+  const weeks = getFilteredWeeks('eng-week-from', 'eng-week-to');
+  const filteredEngs = getFilteredEngineers();
+
+  const engMap = {};
+  for (const r of filteredEngs) {
+    if (!weeks.includes(r.week)) continue;
+    if (teamFilter !== 'ALL' && r.team !== teamFilter) continue;
+    if (!engMap[r.name]) engMap[r.name] = { name: r.name, team: r.team, job: r.job_title, avail: 0, util: 0 };
+    engMap[r.name].avail += r.available_hours;
+    engMap[r.name].util  += r.utilized_hours;
+  }
+
+  const engs = Object.values(engMap).filter(e => e.avail > 0).sort((a, b) => (b.util / b.avail) - (a.util / a.avail));
+  const top20 = engs.slice(0, 20);
+  const labels = top20.map(e => e.name.split(' ').map((w, i) => i === 0 ? w[0] + '.' : w).join(' '));
+  const pcts = top20.map(e => +(e.util / e.avail * 100).toFixed(1));
+  const colors = pcts.map(p => getUtilColor(p));
+
+  if (engChart) engChart.destroy();
+  const ctx = document.getElementById('eng-chart').getContext('2d');
+  engChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Utilisation %', data: pcts, backgroundColor: colors, borderRadius: 6 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw}% utilised` } } },
+      scales: {
+        x: { ticks: { color: '#6b7280', font: { family: 'DM Mono', size: 11 } }, grid: { color: '#2a2f3d' } },
+        y: { min: 0, max: 100, ticks: { color: '#6b7280', callback: v => v + '%' }, grid: { color: '#2a2f3d' } },
+      },
+    },
+  });
+
+  engTableRows = engs.map(e => ({ ...e, pct: e.avail > 0 ? e.util / e.avail * 100 : 0 }));
+  document.getElementById('eng-table-head').innerHTML = `<tr><th>Engineer</th><th>Team</th><th>Role</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>`;
+  renderEngTableBody();
+}
+
+// ── AI panel state ────────────────────────────────────────────────────────────
 let aiConversationHistory = [];
 
 function setPrompt(text) {
@@ -1012,104 +1632,64 @@ function removeLoadingMsg() {
 
 async function sendAiMessage() {
   const input = document.getElementById('ai-input');
-  const text  = input.value.trim();
+  const text = input.value.trim();
   if (!text) return;
-
   input.value = '';
   appendAiMessage('user', text);
   aiConversationHistory.push({ role: 'user', content: text });
-
-  // Loading indicator
   appendAiMessage('assistant', '', true);
-
   try {
-    // Build a context summary of the current data to inject into system prompt
-    const weeks  = ALL_WEEKS.length;
-    const teams  = ALL_TEAMS.length;
-    const engs   = [...new Set(RAW.engineers.map(e => e.name))].length;
+    const weeks = ALL_WEEKS.length;
+    const teams = ALL_TEAMS.length;
+    const engs  = [...new Set(RAW.engineers.map(e => e.name))].length;
     const teamSummary = ALL_TEAMS.map(t => {
       const rows = RAW.teams.filter(r => r.team === t);
-      const totalAvail = rows.reduce((s, r) => s + r.available_hours, 0);
-      const totalUtil  = rows.reduce((s, r) => s + r.utilized_hours, 0);
-      const pct = totalAvail > 0 ? (totalUtil / totalAvail * 100).toFixed(0) : '0';
-      return `${t}: avg ${pct}% utilised`;
+      const ta = rows.reduce((s, r) => s + r.available_hours, 0);
+      const tu = rows.reduce((s, r) => s + r.utilized_hours, 0);
+      return `${t}: ${ta > 0 ? (tu / ta * 100).toFixed(0) : 0}%`;
     }).join('; ');
-
-    // Include the last 4 weeks of team data as context
-    const recentWeeks = ALL_WEEKS.slice(-4);
-    const recentContext = recentWeeks.map(w => {
-      const rows = RAW.teams.filter(r => r.week === w && r.available_hours > 0);
-      return `${w}: ` + rows.map(r => `${r.team} ${(r.utilized_hours/r.available_hours*100).toFixed(0)}%`).join(', ');
-    }).join('\n');
-
-    // Weekly team data for the full period (compact)
-    const fullDataStr = JSON.stringify(RAW.teams.map(r => ({
-      w: r.week.replace('2026 ',''),
-      t: r.team,
-      a: Math.round(r.available_hours),
-      u: Math.round(r.utilized_hours),
-    })));
-
-    const systemPrompt = `You are a resource planning expert assistant with direct access to this company's real-time Resource Guru utilisation data.
-
-DATA SUMMARY:
-- Period: ${ALL_WEEKS[0]} to ${ALL_WEEKS[ALL_WEEKS.length-1]} (${weeks} weeks)
-- Teams: ${teams} | Engineers: ${engs}
-- Team avg utilisation: ${teamSummary}
-
-RECENT WEEKS (last 4):
-${recentContext}
-
-FULL WEEKLY TEAM DATA (week, team, available_hours, utilized_hours):
-${fullDataStr}
-
-Guidelines:
-- Answer concisely and specifically using the data above
-- Flag weeks where any team exceeds 85% utilisation (busy) or 95% (critical)
-- When suggesting project windows, confirm capacity with specific numbers
-- Use week numbers (W14, W15...) when referencing specific weeks
-- Format lists and key findings clearly`;
-
+    const fullDataStr = JSON.stringify(RAW.teams.map(r => ({ w: r.week.replace('2026 ', ''), t: r.team, a: Math.round(r.available_hours), u: Math.round(r.utilized_hours) })));
+    const systemPrompt = `You are a resource planning expert. Data: ${weeks} weeks, ${teams} teams, ${engs} engineers. Team utilisation: ${teamSummary}. Full data: ${fullDataStr}. Answer concisely using week numbers (W14, W15...).`;
     const response = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system:   systemPrompt,
-        messages: aiConversationHistory,
-      }),
+      body: JSON.stringify({ system: systemPrompt, messages: aiConversationHistory }),
     });
-
     const data = await response.json();
     removeLoadingMsg();
-
-    if (!response.ok || data.error) {
-      appendAiMessage('assistant', `⚠️ Error: ${data.error || 'Unknown error'}`);
-      aiConversationHistory.pop(); // remove the user message that failed
-      return;
-    }
-
+    if (!response.ok || data.error) { appendAiMessage('assistant', `⚠️ ${data.error || 'Error'}`); aiConversationHistory.pop(); return; }
     const reply = data.content?.[0]?.text || 'No response';
     aiConversationHistory.push({ role: 'assistant', content: reply });
     appendAiMessage('assistant', reply);
-
-    // Trim history to last 10 exchanges (20 messages) to stay within token limits
-    if (aiConversationHistory.length > 20) {
-      aiConversationHistory = aiConversationHistory.slice(-20);
-    }
+    if (aiConversationHistory.length > 20) aiConversationHistory = aiConversationHistory.slice(-20);
   } catch (err) {
     removeLoadingMsg();
-    appendAiMessage('assistant', `⚠️ Network error: ${err.message}`);
+    appendAiMessage('assistant', `⚠️ ${err.message}`);
   }
 }
 
-// ── Status indicator ──────────────────────────────────────────────────────────
+// ── Status + live clock ───────────────────────────────────────────────────────
+let _clockInterval = null;
+
 function setStatus(state, text) {
   const dot  = document.getElementById('status-dot');
   const span = document.getElementById('status-text');
   if (!dot || !span) return;
-  span.textContent = text;
   const colors = { loading: '#f59e0b', ok: '#22c55e', error: '#ef4444' };
   dot.style.background = colors[state] || '#6b7280';
+  if (state === 'ok') {
+    if (_clockInterval) clearInterval(_clockInterval);
+    function tick() {
+      const n = new Date();
+      const t = [n.getHours(), n.getMinutes(), n.getSeconds()].map(x => String(x).padStart(2, '0')).join(':');
+      if (span) span.textContent = `Live · ${t}`;
+    }
+    tick();
+    _clockInterval = setInterval(tick, 1000);
+  } else {
+    if (_clockInterval) { clearInterval(_clockInterval); _clockInterval = null; }
+    span.textContent = text;
+  }
 }
 
 // ── Live data loading ─────────────────────────────────────────────────────────
@@ -1120,42 +1700,52 @@ async function loadLiveData() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
+    // Skip re-render if data hasn't changed
+    const newSig = data.meta?.fetched_at;
+    if (newSig && newSig === RAW.meta?.fetched_at) {
+      setStatus('ok', '');
+      setTimeout(loadLiveData, 300000);
+      return;
+    }
+
+    const savedTeam = document.getElementById('team-filter')?.value;
     RAW = data;
-    window.RAW = RAW; // expose globally for debugging
+    window.RAW = RAW;
+    setStatus('ok', '');
 
-    setStatus('ok', `Live · ${new Date(data.meta?.fetched_at || Date.now()).toLocaleTimeString()}`);
-
-    // Update AI data info panel
     const infoEl = document.getElementById('ai-data-info');
     if (infoEl) {
       const engs  = [...new Set(RAW.engineers.map(e => e.name))].length;
-      const weeks = [...new Set(RAW.teams.map(r => r.week))].sort();
-      infoEl.textContent = `${engs} engineers · ${[...new Set(RAW.teams.map(r => r.team))].length} teams · ${weeks.length} weeks (${weeks[0]?.replace('2026 ','')} – ${weeks[weeks.length-1]?.replace('2026 ','')})`;
+      const wks   = [...new Set(RAW.teams.map(r => r.week))].sort();
+      infoEl.textContent = `${engs} engineers · ${[...new Set(RAW.teams.map(r => r.team))].length} teams · ${wks.length} weeks`;
     }
-    // not changing the current viewing team when the data is refreshed
-    const savedTeam = document.getElementById('team-filter')?.value;
+
     init();
+
+    // Restore selected team
     if (savedTeam && savedTeam !== 'ALL') {
-    document.getElementById('team-filter').value = savedTeam;
-    renderUtilisation();
+      document.getElementById('team-filter').value = savedTeam;
+      renderUtilisation();
     }
-    // Auto-refresh every 5 minutes
-    setTimeout(loadLiveData, parseInt('300000'));
+
+    const weeksLoaded = [...new Set((data.teams || []).map(r => r.week))].length;
+    setTimeout(loadLiveData, weeksLoaded < 10 ? 45000 : 300000);
   } catch (err) {
     setStatus('error', 'Failed to load live data');
     console.error('loadLiveData error:', err);
-
-    // If the proxy is not running, show a helpful message in the dashboard
     const kpiGrid = document.getElementById('kpi-grid');
-    if (kpiGrid) {
-      kpiGrid.innerHTML = `<div class="chart-card" style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)">
-        <div style="font-size:20px;margin-bottom:12px">⚠️</div>
-        <div style="font-weight:700;margin-bottom:8px">Could not connect to proxy server</div>
-        <div style="font-size:13px">Make sure the server is running: <code style="background:var(--surface2);padding:2px 8px;border-radius:4px">npm start</code></div>
-        <div style="font-size:12px;margin-top:8px;color:#4f8ef7;cursor:pointer" onclick="loadLiveData()">↻ Retry</div>
-      </div>`;
-    }
+    if (kpiGrid) kpiGrid.innerHTML = `<div class="chart-card" style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)"><div style="font-size:20px;margin-bottom:12px">⚠️</div><div style="font-weight:700;margin-bottom:8px">Could not connect to proxy server</div><div style="font-size:12px;margin-top:8px;color:#4f8ef7;cursor:pointer" onclick="loadLiveData()">↻ Retry</div></div>`;
+    setTimeout(loadLiveData, 30000);
   }
+}
+
+// ── Override populateSelects to also populate new scenario selects ────────────
+const _origPopulate = populateSelects;
+function populateSelects() {
+  _origPopulate();
+  // Add person team select
+  const ap = document.getElementById('addperson-team');
+  if (ap) ap.innerHTML = ALL_TEAMS.map(t => `<option value="${t}">${t}</option>`).join('');
 }
 
 // Boot
@@ -1230,6 +1820,83 @@ loadLiveData();
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+
+<!-- SETTINGS OVERLAY + PANEL -->
+<div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
+<div class="settings-panel" id="settings-panel">
+  <div class="settings-header">
+    <div style="font-size:16px;font-weight:800">⚙️ Dashboard Settings</div>
+    <button class="settings-close" onclick="toggleSettings()">✕</button>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-section-title">Booking Type</div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Confirmed Bookings</div>
+        <div class="settings-row-desc">Firm bookings count toward utilisation</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-confirmed" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Tentative Bookings</div>
+        <div class="settings-row-desc">Tentative (waiting list) hours shown in orange</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-tentative" onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-section-title">Resource Type</div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Employees</div>
+        <div class="settings-row-desc">Regular permanent staff</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-employees" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Contractors</div>
+        <div class="settings-row-desc">Contract / freelance workers</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-contractors" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <div class="settings-section-title">Seniority Level</div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Directors</div>
+        <div class="settings-row-desc">Director-level staff</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-directors" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Managers</div>
+        <div class="settings-row-desc">Manager / Head of level staff</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-managers" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-row-label">Include Staff</div>
+        <div class="settings-row-desc">Regular engineers and team members</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="s-staff" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <div class="settings-note">
+    ⚠️ Contractor and tentative data requires the full booking fields from Resource Guru.
+    If contractors all show as employees, check that resource types are configured in your RG account.
+    Settings are applied immediately across all dashboard tabs.
   </div>
 </div>
 
