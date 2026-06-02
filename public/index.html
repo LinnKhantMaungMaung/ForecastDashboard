@@ -1132,11 +1132,15 @@ async function loadLiveData() {
       const weeks = [...new Set(RAW.teams.map(r => r.week))].sort();
       infoEl.textContent = `${engs} engineers · ${[...new Set(RAW.teams.map(r => r.team))].length} teams · ${weeks.length} weeks (${weeks[0]?.replace('2026 ','')} – ${weeks[weeks.length-1]?.replace('2026 ','')})`;
     }
-
+    // not changing the current viewing team when the data is refreshed
+    const savedTeam = document.getElementById('team-filter')?.value;
     init();
-
-    // Auto-refresh every 15 minutes
-    setTimeout(loadLiveData, parseInt('6000'));
+    if (savedTeam && savedTeam !== 'ALL') {
+    document.getElementById('team-filter').value = savedTeam;
+    renderUtilisation();
+    }
+    // Auto-refresh every 5 minutes
+    setTimeout(loadLiveData, parseInt('300000'));
   } catch (err) {
     setStatus('error', 'Failed to load live data');
     console.error('loadLiveData error:', err);
