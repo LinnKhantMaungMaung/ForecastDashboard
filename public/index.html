@@ -3,284 +3,139 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Resource Utilisation Report</title>
+<title>Resource Utilisation Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d0f14;
-    --surface: #161920;
-    --surface2: #1e222d;
-    --border: #2a2f3d;
-    --text: #e8eaf0;
-    --muted: #6b7280;
-    --accent: #4f8ef7;
-    --accent2: #7c3aed;
-    --green: #22c55e;
-    --yellow: #f59e0b;
-    --red: #ef4444;
-    --orange: #f97316;
+    --bg:#0d0f14; --surface:#161920; --surface2:#1e222d; --border:#2a2f3d;
+    --text:#e8eaf0; --muted:#6b7280; --accent:#4f8ef7; --accent2:#7c3aed;
+    --green:#22c55e; --yellow:#f59e0b; --red:#ef4444; --orange:#f97316;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; }
-
-  /* NAV */
-  nav {
-    display: flex; align-items: center; gap: 0;
-    background: var(--surface); border-bottom: 1px solid var(--border);
-    padding: 0 24px; position: sticky; top: 0; z-index: 100;
-  }
-  .nav-brand {
-    font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--accent); padding: 18px 0; margin-right: 32px; white-space: nowrap;
-  }
-  .nav-tabs { display: flex; gap: 0; }
-  .nav-tab {
-    padding: 18px 20px; cursor: pointer; font-size: 13px; font-weight: 600;
-    color: var(--muted); border-bottom: 2px solid transparent; transition: all .2s;
-    letter-spacing: 0.04em; white-space: nowrap;
-  }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-  /* PAGE */
-  .page { display: none; padding: 28px 32px; max-width: 1600px; margin: 0 auto; }
-  .page.active { display: block; }
-
-  /* HEADER ROW */
-  .page-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
-  }
-  .page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
-  .page-subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
-
-  /* CONTROLS */
-  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  .pill-group { display: flex; background: var(--surface2); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
-  .pill {
-    padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
-    color: var(--muted); transition: all .15s; letter-spacing: 0.04em; text-transform: uppercase;
-  }
-  .pill.active { background: var(--accent); color: #fff; }
-  .pill:hover:not(.active) { color: var(--text); background: var(--border); }
-
-  select {
-    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
-    padding: 7px 12px; border-radius: 8px; font-size: 13px; font-family: 'Syne', sans-serif;
-    cursor: pointer; outline: none;
-  }
-  select:focus { border-color: var(--accent); }
-
-  /* KPI CARDS */
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
-  .kpi {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 18px 20px; position: relative; overflow: hidden;
-  }
-  .kpi::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: var(--kpi-color, var(--accent));
-  }
-  .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 8px; }
-  .kpi-value { font-size: 28px; font-weight: 800; letter-spacing: -0.03em; }
-  .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: 'DM Mono', monospace; }
-
-  /* CHART CARD */
-  .chart-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 24px; margin-bottom: 20px;
-  }
-  .chart-card-header {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
-  }
-  .chart-card-title { font-size: 15px; font-weight: 700; }
-  .chart-card-subtitle { font-size: 12px; color: var(--muted); margin-top: 3px; }
-  .chart-container { position: relative; width: 100%; }
-
-  /* TABLE */
-  .table-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    overflow: hidden; margin-bottom: 20px;
-  }
-  .table-header {
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  }
-  .table-title { font-size: 14px; font-weight: 700; }
-  .search-input {
-    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
-    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-family: 'Syne', sans-serif;
-    width: 200px; outline: none;
-  }
-  .search-input:focus { border-color: var(--accent); }
-  .search-input::placeholder { color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; }
-  th {
-    padding: 10px 16px; text-align: left; font-size: 11px; font-weight: 600;
-    color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
-    background: var(--surface2); border-bottom: 1px solid var(--border);
-    cursor: pointer; user-select: none; white-space: nowrap;
-  }
-  th:hover { color: var(--text); }
-  td { padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: rgba(79,142,247,0.04); }
-  .mono { font-family: 'DM Mono', monospace; font-size: 12px; }
-
-  /* UTIL BAR */
-  .util-bar-wrap { display: flex; align-items: center; gap: 8px; }
-  .util-bar { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; min-width: 60px; }
-  .util-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
-  .util-pct { font-family: 'DM Mono', monospace; font-size: 12px; min-width: 38px; text-align: right; }
-
-  /* BADGE */
-  .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
-    letter-spacing: 0.04em; text-transform: uppercase;
-  }
-  .badge-green { background: rgba(34,197,94,.15); color: var(--green); }
-  .badge-yellow { background: rgba(245,158,11,.15); color: var(--yellow); }
-  .badge-orange { background: rgba(249,115,22,.15); color: var(--orange); }
-  .badge-red { background: rgba(239,68,68,.15); color: var(--red); }
-  .badge-blue { background: rgba(79,142,247,.15); color: var(--accent); }
-
-  /* LEGEND */
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-
-  /* SCENARIO PAGE */
-  .scenario-layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
-  @media (max-width: 1100px) { .scenario-layout { grid-template-columns: 1fr; } }
-
-  .form-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 24px; align-self: start;
-  }
-  .form-title { font-size: 15px; font-weight: 700; margin-bottom: 20px; }
-  .form-group { margin-bottom: 16px; }
-  .form-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; display: block; }
-  .form-input {
-    width: 100%; background: var(--surface2); border: 1px solid var(--border);
-    color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px;
-    font-family: 'Syne', sans-serif; outline: none; transition: border-color .15s;
-  }
-  .form-input:focus { border-color: var(--accent); }
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .btn {
-    width: 100%; padding: 10px; border-radius: 8px; border: none; cursor: pointer;
-    font-size: 13px; font-weight: 700; letter-spacing: 0.04em; transition: all .15s; font-family: 'Syne', sans-serif;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #3a7de4; }
-  .btn-danger { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
-  .btn-danger:hover { background: rgba(239,68,68,.25); }
-
-  .project-list { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
-  .project-chip {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
-  }
-  .project-chip-name { font-size: 13px; font-weight: 600; }
-  .project-chip-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: 'DM Mono', monospace; }
-  .chip-remove {
-    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px;
-    padding: 0; line-height: 1; transition: color .15s;
-  }
-  .chip-remove:hover { color: var(--red); }
-
-  .alert-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
-  .alert {
-    display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px;
-    border-radius: 10px; border-left: 3px solid;
-  }
-  .alert-critical { background: rgba(239,68,68,.08); border-color: var(--red); }
-  .alert-warning { background: rgba(249,115,22,.08); border-color: var(--orange); }
-  .alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-  .alert-title { font-size: 13px; font-weight: 700; }
-  .alert-body { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
-
-  .empty { text-align: center; padding: 48px; color: var(--muted); font-size: 14px; }
-
-  /* TOOLTIP */
-  .tooltip-trigger { cursor: help; }
-
-  /* HEATMAP */
-  .heatmap-grid { overflow-x: auto; }
-  .heatmap-table { border-collapse: separate; border-spacing: 3px; }
-  .heatmap-table th { padding: 6px 8px; font-size: 10px; font-weight: 600; color: var(--muted); white-space: nowrap; background: transparent; cursor: default; }
-  .heatmap-cell {
-    width: 46px; height: 36px; border-radius: 6px; text-align: center; font-size: 10px;
-    font-family: 'DM Mono', monospace; font-weight: 500; cursor: default;
-    vertical-align: middle; transition: transform .1s;
-  }
-  .heatmap-cell:hover { transform: scale(1.12); z-index: 10; position: relative; }
-  .hm-0 { background: var(--surface2); color: var(--muted); }
-  .hm-1 { background: rgba(34,197,94,.2); color: #4ade80; }
-  .hm-2 { background: rgba(34,197,94,.4); color: #22c55e; }
-  .hm-3 { background: rgba(245,158,11,.35); color: #f59e0b; }
-  .hm-4 { background: rgba(249,115,22,.45); color: #fb923c; }
-  .hm-5 { background: rgba(239,68,68,.5); color: #f87171; }
-  .hm-team { font-size: 12px; font-weight: 600; white-space: nowrap; padding: 6px 10px; text-align: left; background: transparent; color: var(--text); }
-
-  /* SCENARIO CHART */
-  #scenario-chart-wrap .chart-card { margin-bottom: 10px; }
-
-  /* ── AI chat panel ── */
-  .ai-msg { display: flex; flex-direction: column; max-width: 88%; }
-  .ai-msg-user { align-self: flex-end; }
-  .ai-msg-assistant { align-self: flex-start; }
-  .ai-msg-bubble {
-    padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6;
-    white-space: pre-wrap; word-break: break-word;
-  }
-  .ai-msg-user .ai-msg-bubble {
-    background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
-  }
-  .ai-msg-assistant .ai-msg-bubble {
-    background: var(--surface2); border: 1px solid var(--border); border-bottom-left-radius: 3px;
-    color: var(--text);
-  }
-  @keyframes blink { 0%,100%{opacity:.3} 50%{opacity:1} }
-  .ai-typing { letter-spacing: 4px; animation: blink 1.2s infinite; }
-
-  /* ── Settings panel ── */
-  .settings-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5);
-    z-index: 200; backdrop-filter: blur(2px);
-  }
-  .settings-overlay.open { display: block; }
-  .settings-panel {
-    position: fixed; top: 0; right: -420px; width: 420px; height: 100vh;
-    background: var(--surface); border-left: 1px solid var(--border);
-    z-index: 201; transition: right .25s ease; overflow-y: auto; padding: 28px 24px;
-  }
-  .settings-panel.open { right: 0; }
-  .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-  .settings-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; padding: 4px; }
-  .settings-close:hover { color: var(--text); }
-  .settings-section { margin-bottom: 24px; }
-  .settings-section-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-  .settings-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
-  .settings-row:last-child { border-bottom: none; }
-  .settings-row-label { font-size: 13px; font-weight: 600; }
-  .settings-row-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  /* Toggle switch */
-  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
-  .toggle input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider {
-    position: absolute; cursor: pointer; inset: 0; background: var(--border);
-    border-radius: 22px; transition: .2s;
-  }
-  .toggle-slider:before {
-    content: ''; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px;
-    background: white; border-radius: 50%; transition: .2s;
-  }
-  input:checked + .toggle-slider { background: var(--accent); }
-  input:checked + .toggle-slider:before { transform: translateX(18px); }
-  .settings-note { font-size: 11px; color: var(--muted); background: var(--surface2); border-radius: 8px; padding: 10px 12px; margin-top: 12px; line-height: 1.6; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh}
+  nav{display:flex;align-items:center;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;position:sticky;top:0;z-index:100;gap:0}
+  .nav-brand{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);padding:18px 0;margin-right:32px;white-space:nowrap}
+  .nav-tabs{display:flex;gap:0}
+  .nav-tab{padding:18px 20px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;letter-spacing:.04em;white-space:nowrap}
+  .nav-tab:hover{color:var(--text)}
+  .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .page{display:none;padding:28px 32px;max-width:1600px;margin:0 auto}
+  .page.active{display:block}
+  .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+  .page-title{font-size:22px;font-weight:800;letter-spacing:-.02em}
+  .page-subtitle{font-size:13px;color:var(--muted);margin-top:2px;font-family:'DM Mono',monospace}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill-group{display:flex;background:var(--surface2);border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+  .pill{padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;letter-spacing:.04em;text-transform:uppercase}
+  .pill.active{background:var(--accent);color:#fff}
+  .pill:hover:not(.active){color:var(--text);background:var(--border)}
+  select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;font-family:'Syne',sans-serif;cursor:pointer;outline:none}
+  select:focus{border-color:var(--accent)}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+  .kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden}
+  .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kpi-color,var(--accent))}
+  .kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px}
+  .kpi-value{font-size:28px;font-weight:800;letter-spacing:-.03em}
+  .kpi-sub{font-size:12px;color:var(--muted);margin-top:4px;font-family:'DM Mono',monospace}
+  .chart-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
+  .chart-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+  .chart-card-title{font-size:15px;font-weight:700}
+  .chart-card-subtitle{font-size:12px;color:var(--muted);margin-top:3px}
+  .chart-container{position:relative;width:100%}
+  .table-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px}
+  .table-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .table-title{font-size:14px;font-weight:700}
+  .search-input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;font-size:13px;font-family:'Syne',sans-serif;width:200px;outline:none}
+  .search-input:focus{border-color:var(--accent)}
+  .search-input::placeholder{color:var(--muted)}
+  table{width:100%;border-collapse:collapse}
+  th{padding:10px 16px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;background:var(--surface2);border-bottom:1px solid var(--border);cursor:pointer;user-select:none;white-space:nowrap}
+  th:hover{color:var(--text)}
+  td{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:rgba(79,142,247,.04)}
+  .mono{font-family:'DM Mono',monospace;font-size:12px}
+  .util-bar-wrap{display:flex;align-items:center;gap:8px}
+  .util-bar{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;min-width:60px}
+  .util-bar-fill{height:100%;border-radius:3px;transition:width .3s}
+  .util-pct{font-family:'DM Mono',monospace;font-size:12px;min-width:38px;text-align:right}
+  .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .badge-green{background:rgba(34,197,94,.15);color:var(--green)}
+  .badge-yellow{background:rgba(245,158,11,.15);color:var(--yellow)}
+  .badge-orange{background:rgba(249,115,22,.15);color:var(--orange)}
+  .badge-red{background:rgba(239,68,68,.15);color:var(--red)}
+  .badge-blue{background:rgba(79,142,247,.15);color:var(--accent)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .legend-dot{width:10px;height:10px;border-radius:50%}
+  .scenario-layout{display:grid;grid-template-columns:380px 1fr;gap:20px}
+  @media(max-width:1100px){.scenario-layout{grid-template-columns:1fr}}
+  .form-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;align-self:start}
+  .form-title{font-size:15px;font-weight:700;margin-bottom:20px}
+  .form-group{margin-bottom:16px}
+  .form-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:block}
+  .form-input{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;font-family:'Syne',sans-serif;outline:none;transition:border-color .15s}
+  .form-input:focus{border-color:var(--accent)}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .btn{width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:700;letter-spacing:.04em;transition:all .15s;font-family:'Syne',sans-serif}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:#3a7de4}
+  .btn-danger{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+  .btn-danger:hover{background:rgba(239,68,68,.25)}
+  .project-list{display:flex;flex-direction:column;gap:8px}
+  .project-chip{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .project-chip-name{font-size:13px;font-weight:600}
+  .project-chip-meta{font-size:11px;color:var(--muted);margin-top:2px;font-family:'DM Mono',monospace}
+  .chip-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0;line-height:1;transition:color .15s}
+  .chip-remove:hover{color:var(--red)}
+  .alert-list{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+  .alert{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:10px;border-left:3px solid}
+  .alert-critical{background:rgba(239,68,68,.08);border-color:var(--red)}
+  .alert-warning{background:rgba(249,115,22,.08);border-color:var(--orange)}
+  .alert-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+  .alert-title{font-size:13px;font-weight:700}
+  .alert-body{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .empty{text-align:center;padding:48px;color:var(--muted);font-size:14px}
+  .heatmap-grid{overflow-x:auto}
+  .heatmap-table{border-collapse:separate;border-spacing:3px}
+  .heatmap-table th{padding:6px 8px;font-size:10px;font-weight:600;color:var(--muted);white-space:nowrap;background:transparent;cursor:default}
+  .heatmap-cell{width:46px;height:36px;border-radius:6px;text-align:center;font-size:10px;font-family:'DM Mono',monospace;font-weight:500;cursor:default;vertical-align:middle;transition:transform .1s}
+  .heatmap-cell:hover{transform:scale(1.12);z-index:10;position:relative}
+  .hm-0{background:var(--surface2);color:var(--muted)}
+  .hm-1{background:rgba(34,197,94,.2);color:#4ade80}
+  .hm-2{background:rgba(34,197,94,.4);color:#22c55e}
+  .hm-3{background:rgba(245,158,11,.35);color:#f59e0b}
+  .hm-4{background:rgba(249,115,22,.45);color:#fb923c}
+  .hm-5{background:rgba(239,68,68,.5);color:#f87171}
+  .hm-team{font-size:12px;font-weight:600;white-space:nowrap;padding:6px 10px;text-align:left;background:transparent;color:var(--text)}
+  /* Settings panel */
+  .settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;backdrop-filter:blur(2px)}
+  .settings-overlay.open{display:block}
+  .settings-panel{position:fixed;top:0;right:-440px;width:440px;height:100vh;background:var(--surface);border-left:1px solid var(--border);z-index:201;transition:right .25s ease;overflow-y:auto;padding:28px 24px}
+  .settings-panel.open{right:0}
+  .settings-section{margin-bottom:24px}
+  .settings-section-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .settings-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+  .settings-row:last-child{border-bottom:none}
+  .settings-row-label{font-size:13px;font-weight:600}
+  .settings-row-desc{font-size:11px;color:var(--muted);margin-top:2px}
+  .toggle{position:relative;display:inline-block;width:40px;height:22px}
+  .toggle input{opacity:0;width:0;height:0}
+  .toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--border);border-radius:22px;transition:.2s}
+  .toggle-slider:before{content:'';position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.2s}
+  input:checked+.toggle-slider{background:var(--accent)}
+  input:checked+.toggle-slider:before{transform:translateX(18px)}
+  .settings-note{font-size:11px;color:var(--muted);background:var(--surface2);border-radius:8px;padding:10px 12px;margin-top:12px;line-height:1.6}
+  /* AI chat */
+  .ai-msg{display:flex;flex-direction:column;max-width:88%}
+  .ai-msg-user{align-self:flex-end}
+  .ai-msg-assistant{align-self:flex-start}
+  .ai-msg-bubble{padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+  .ai-msg-user .ai-msg-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:3px}
+  .ai-msg-assistant .ai-msg-bubble{background:var(--surface2);border:1px solid var(--border);border-bottom-left-radius:3px;color:var(--text)}
+  @keyframes blink{0%,100%{opacity:.3}50%{opacity:1}}
+  .ai-typing{letter-spacing:4px;animation:blink 1.2s infinite}
 </style>
 </head>
 <body>
@@ -288,14 +143,14 @@
 <nav>
   <div class="nav-brand">📊 Resource Guru</div>
   <div class="nav-tabs">
-    <div class="nav-tab active" onclick="showPage('utilisation')">Utilisation</div>
-    <div class="nav-tab" onclick="showPage('heatmap')">Heatmap</div>
-    <div class="nav-tab" onclick="showPage('engineers')">Engineers</div>
-    <div class="nav-tab" onclick="showPage('scenario')">⚡ Scenario Planner</div>
-    <div class="nav-tab" id="ai-nav-tab" onclick="showPage('ai')">🤖 AI Insights</div>
+    <div class="nav-tab active" onclick="showPage('utilisation',this)">Utilisation</div>
+    <div class="nav-tab" onclick="showPage('heatmap',this)">Heatmap</div>
+    <div class="nav-tab" onclick="showPage('engineers',this)">Engineers</div>
+    <div class="nav-tab" onclick="showPage('scenario',this)">⚡ Scenario Planner</div>
+    <div class="nav-tab" onclick="showPage('ai',this)">🤖 AI Insights</div>
   </div>
-  <button onclick="toggleSettings()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'Syne',sans-serif;font-weight:600;transition:all .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">⚙️ Settings</button>
-  <div id="data-status" style="margin-left:8px;padding:0 20px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
+  <button onclick="toggleSettings()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'Syne',sans-serif;font-weight:600;transition:all .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">⚙️ Settings</button>
+  <div id="data-status" style="margin-left:12px;padding:0 8px;font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;display:flex;align-items:center;gap:8px">
     <span id="status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block"></span>
     <span id="status-text">Loading...</span>
   </div>
@@ -306,23 +161,19 @@
   <div class="page-header">
     <div>
       <div class="page-title">Team Utilisation</div>
-      <div class="page-subtitle">W14 – W40 · Apr – Oct 2026</div>
+      <div class="page-subtitle" id="util-subtitle">Loading...</div>
     </div>
     <div class="controls">
       <div class="pill-group" id="view-toggle">
         <div class="pill active" onclick="setViewMode('team')">Team</div>
         <div class="pill" onclick="setViewMode('engineer')">Engineer</div>
       </div>
-      <select id="team-filter" onchange="renderUtilisation()">
-        <option value="ALL">All Teams</option>
-      </select>
+      <select id="team-filter" onchange="renderUtilisation()"><option value="ALL">All Teams</option></select>
       <select id="week-range-from" onchange="renderUtilisation()"></select>
       <select id="week-range-to" onchange="renderUtilisation()"></select>
     </div>
   </div>
-
   <div class="kpi-grid" id="kpi-grid"></div>
-
   <div class="chart-card">
     <div class="chart-card-header">
       <div>
@@ -333,25 +184,17 @@
         <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>&lt;70% Healthy</div>
         <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>70–85% Busy</div>
         <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>85–95% High</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>>95% Critical</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>&gt;95% Critical</div>
       </div>
     </div>
-    <div class="chart-container" style="height:380px">
-      <canvas id="main-chart"></canvas>
-    </div>
+    <div class="chart-container" style="height:380px"><canvas id="main-chart"></canvas></div>
   </div>
-
   <div class="table-card">
     <div class="table-header">
       <div class="table-title" id="table-title">Team Breakdown</div>
       <input class="search-input" id="table-search" placeholder="Search..." oninput="filterTable()">
     </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead id="table-head"></thead>
-        <tbody id="table-body"></tbody>
-      </table>
-    </div>
+    <div style="overflow-x:auto"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
   </div>
 </div>
 
@@ -363,9 +206,7 @@
       <div class="page-subtitle">Team × Week · colour = utilisation %</div>
     </div>
     <div class="controls">
-      <select id="heatmap-filter" onchange="renderHeatmap()">
-        <option value="ALL">All Teams</option>
-      </select>
+      <select id="heatmap-filter" onchange="renderHeatmap()"><option value="ALL">All Teams</option></select>
     </div>
   </div>
   <div class="chart-card">
@@ -379,7 +220,7 @@
         <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.4)"></div>40–70%</div>
         <div class="legend-item"><div class="legend-dot" style="background:rgba(245,158,11,.35)"></div>70–85%</div>
         <div class="legend-item"><div class="legend-dot" style="background:rgba(249,115,22,.45)"></div>85–95%</div>
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,.5)"></div>>95%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,.5)"></div>&gt;95%</div>
       </div>
     </div>
     <div class="heatmap-grid" id="heatmap-container"></div>
@@ -394,37 +235,26 @@
       <div class="page-subtitle">Individual weekly breakdown</div>
     </div>
     <div class="controls">
-      <select id="eng-team-filter" onchange="renderEngineers()">
-        <option value="ALL">All Teams</option>
-      </select>
+      <select id="eng-team-filter" onchange="renderEngineers()"><option value="ALL">All Teams</option></select>
       <select id="eng-week-from" onchange="renderEngineers()"></select>
       <select id="eng-week-to" onchange="renderEngineers()"></select>
     </div>
   </div>
-
   <div class="chart-card">
     <div class="chart-card-header">
       <div>
         <div class="chart-card-title">Engineer Weekly Utilisation</div>
-        <div class="chart-card-subtitle">Average utilisation over selected week range</div>
+        <div class="chart-card-subtitle">Average over selected week range (top 20)</div>
       </div>
     </div>
-    <div class="chart-container" style="height:420px">
-      <canvas id="eng-chart"></canvas>
-    </div>
+    <div class="chart-container" style="height:420px"><canvas id="eng-chart"></canvas></div>
   </div>
-
   <div class="table-card">
     <div class="table-header">
       <div class="table-title">Engineer Detail</div>
       <input class="search-input" id="eng-search" placeholder="Search engineer..." oninput="filterEngTable()">
     </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead id="eng-table-head"></thead>
-        <tbody id="eng-table-body"></tbody>
-      </table>
-    </div>
+    <div style="overflow-x:auto"><table><thead id="eng-table-head"></thead><tbody id="eng-table-body"></tbody></table></div>
   </div>
 </div>
 
@@ -433,7 +263,7 @@
   <div class="page-header">
     <div>
       <div class="page-title">⚡ Scenario Planner</div>
-      <div class="page-subtitle">Model multi-team projects with overlapping phases and identify resource bottlenecks</div>
+      <div class="page-subtitle">Model multi-team projects with overlapping phases</div>
     </div>
     <div class="controls">
       <div class="pill-group" id="scenario-view-toggle">
@@ -442,51 +272,40 @@
       </div>
     </div>
   </div>
-
   <div class="scenario-layout">
-    <!-- LEFT: Project builder -->
     <div>
+      <!-- Project builder -->
       <div class="form-card">
-        <div class="form-title">Project Setup</div>
-
+        <div class="form-title">Add Project</div>
         <div class="form-group">
           <label class="form-label">Project Name</label>
           <input class="form-input" id="proj-name" placeholder="e.g. Amazon DRH5">
         </div>
-
         <div class="form-row">
           <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">Project Start Date</label>
+            <label class="form-label">Start Date</label>
             <input class="form-input" id="proj-start-date" type="date">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">Project End Date</label>
+            <label class="form-label">End Date (optional)</label>
             <input class="form-input" id="proj-end-date" type="date">
           </div>
         </div>
-
         <div style="height:16px"></div>
-        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Team Phases</div>
-
-        <div id="phase-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
-          <!-- Phases added dynamically -->
-        </div>
-
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Team Phases</div>
+        <div id="phase-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
         <button class="btn" style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);margin-bottom:12px" onclick="addPhase()">+ Add Team Phase</button>
-
-        <div style="height:8px;border-top:1px solid var(--border);margin-bottom:12px"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px"></div>
         <button class="btn btn-primary" onclick="addProject()">Add to Scenario</button>
       </div>
-
-      <!-- Saved projects -->
+      <!-- Project list -->
       <div class="project-list" id="project-list" style="margin-top:12px">
         <div class="empty" style="padding:24px">No projects yet. Add one above.</div>
       </div>
-      <div style="margin-top:12px" id="clear-btn-wrap" style="display:none">
+      <div style="margin-top:12px;display:none" id="clear-btn-wrap">
         <button class="btn btn-danger" onclick="clearProjects()">Clear All Projects</button>
       </div>
-
-      <!-- Add Person to Team -->
+      <!-- Add person -->
       <div class="form-card" style="margin-top:16px">
         <div class="form-title">👤 Add Person to Team</div>
         <div class="form-group">
@@ -499,23 +318,25 @@
             <input class="form-input" id="addperson-count" type="number" min="1" max="20" value="1">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label class="form-label">Hours/Week Each</label>
+            <label class="form-label">Hrs/Week Each</label>
             <input class="form-input" id="addperson-hours" type="number" min="1" max="60" value="40">
           </div>
         </div>
-        <div style="height:12px"></div>
+        <div style="height:10px"></div>
         <button class="btn btn-primary" onclick="applyAddPerson()">Apply to Forecast</button>
         <button class="btn" style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)" onclick="clearAddPerson()">Clear</button>
         <div id="addperson-status" style="font-size:12px;color:var(--muted);margin-top:8px;font-family:'DM Mono',monospace"></div>
       </div>
     </div>
-
-    <!-- RIGHT: Results -->
     <div>
       <div id="alert-container"></div>
-
-      <!-- Utilisation view -->
-      <div id="scenario-utilisation-view">
+      <!-- Gantt view -->
+      <div id="gantt-view" style="display:none" class="chart-card">
+        <div style="font-size:15px;font-weight:700;margin-bottom:16px">Project Timeline (Gantt)</div>
+        <div id="gantt-container" style="overflow-x:auto"></div>
+      </div>
+      <!-- Utilisation chart -->
+      <div id="util-view">
         <div class="chart-card">
           <div class="chart-card-header">
             <div>
@@ -524,30 +345,12 @@
             </div>
             <select id="scenario-team-select" onchange="renderScenario()" style="min-width:180px"></select>
           </div>
-          <div class="chart-container" style="height:340px">
-            <canvas id="scenario-chart"></canvas>
-          </div>
+          <div class="chart-container" style="height:340px"><canvas id="scenario-chart"></canvas></div>
         </div>
       </div>
-
-      <!-- Gantt view -->
-      <div id="scenario-gantt-view" style="display:none">
-        <div class="chart-card">
-          <div class="chart-card-header">
-            <div>
-              <div class="chart-card-title">Project Timeline (Gantt)</div>
-              <div class="chart-card-subtitle">Team phases — width = duration, overlap = concurrent work</div>
-            </div>
-          </div>
-          <div id="gantt-container" style="overflow-x:auto;min-height:120px"></div>
-        </div>
-      </div>
-
-      <!-- Bottleneck table (always shown) -->
+      <!-- Bottleneck table -->
       <div class="table-card">
-        <div class="table-header">
-          <div class="table-title">Bottleneck Summary — All Teams</div>
-        </div>
+        <div class="table-header"><div class="table-title">Bottleneck Summary</div></div>
         <div style="overflow-x:auto">
           <table>
             <thead>
@@ -566,1191 +369,6 @@
   </div>
 </div>
 
-</div>
-
-<script>
-// ===================== DATA =====================
-// RAW is populated dynamically by loadLiveData()
-let RAW = { teams: [], engineers: [], engineer_list: [] };
-
-
-// These are populated inside init() after RAW is loaded from the API
-let ALL_WEEKS = [];
-let ALL_TEAMS = [];
-
-// ===================== STATE =====================
-let viewMode = 'team'; // 'team' | 'engineer'
-let mainChart = null;
-let engChart = null;
-let scenarioChart = null;
-let forecastProjects = [];
-let tableRows = [];
-let engTableRows = [];
-
-// ===================== INIT =====================
-function init() {
-  // Recompute from live RAW data (populated from the API by loadLiveData)
-  ALL_WEEKS = [...new Set(RAW.teams.map(r => r.week))].sort();
-  ALL_TEAMS = [...new Set(RAW.teams.map(r => r.team))].sort();
-  populateSelects();
-  renderUtilisation();
-  renderHeatmap();
-  renderEngineers();
-  renderScenario();
-}
-
-function populateSelects() {
-  const teamOpts = ALL_TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
-
-  // Utilisation page
-  document.getElementById('team-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
-  const weekOpts = ALL_WEEKS.map(w=>`<option value="${w}">${w}</option>`).join('');
-  const wf = document.getElementById('week-range-from');
-  const wt = document.getElementById('week-range-to');
-  wf.innerHTML = weekOpts; wt.innerHTML = weekOpts;
-  // Always default to the full available range
-  wf.value = ALL_WEEKS[0];
-  wt.value = ALL_WEEKS[ALL_WEEKS.length - 1];
-  // Sync heatmap and engineer selects too
-  const hef = document.getElementById('eng-week-from');
-  const het = document.getElementById('eng-week-to');
-  if (hef) { hef.innerHTML = weekOpts; hef.value = ALL_WEEKS[0]; }
-  if (het) { het.innerHTML = weekOpts; het.value = ALL_WEEKS[ALL_WEEKS.length - 1]; }
-
-  // Heatmap
-  document.getElementById('heatmap-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
-
-  // Engineers page
-  document.getElementById('eng-team-filter').innerHTML = '<option value="ALL">All Teams</option>' + teamOpts;
-  const ewf = document.getElementById('eng-week-from');
-  const ewt = document.getElementById('eng-week-to');
-  ewf.innerHTML = weekOpts; ewt.innerHTML = weekOpts;
-  ewf.value = ALL_WEEKS[0]; ewt.value = ALL_WEEKS[ALL_WEEKS.length-1];
-
-  // Scenario
-  document.getElementById('proj-team').innerHTML = teamOpts;
-  document.getElementById('proj-start').innerHTML = weekOpts;
-  document.getElementById('proj-end').innerHTML = weekOpts;
-  document.getElementById('proj-end').value = ALL_WEEKS[ALL_WEEKS.length-1];
-  document.getElementById('scenario-team-select').innerHTML = teamOpts;
-}
-
-// ===================== PAGES =====================
-function showPage(p) {
-  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
-  document.getElementById('page-'+p).classList.add('active');
-  event.target.classList.add('active');
-  if (p==='heatmap') renderHeatmap();
-  if (p==='engineers') renderEngineers();
-  if (p==='scenario') renderScenario();
-}
-
-// ===================== VIEW MODE =====================
-function setViewMode(m) {
-  viewMode = m;
-  document.querySelectorAll('#view-toggle .pill').forEach((p,i)=>{
-    p.classList.toggle('active', (i===0&&m==='team')||(i===1&&m==='engineer'));
-  });
-  renderUtilisation();
-}
-
-// ===================== UTIL HELPERS =====================
-function getUtilColor(pct) {
-  if (pct > 95) return '#ef4444';
-  if (pct > 85) return '#f97316';
-  if (pct > 70) return '#f59e0b';
-  return '#22c55e';
-}
-function getBadge(pct) {
-  if (pct > 95) return `<span class="badge badge-red">Critical</span>`;
-  if (pct > 85) return `<span class="badge badge-orange">High</span>`;
-  if (pct > 70) return `<span class="badge badge-yellow">Busy</span>`;
-  if (pct > 0) return `<span class="badge badge-green">Healthy</span>`;
-  return `<span class="badge" style="background:rgba(107,114,128,.15);color:var(--muted)">No Data</span>`;
-}
-function utilBar(pct) {
-  const color = getUtilColor(pct);
-  return `<div class="util-bar-wrap">
-    <div class="util-bar"><div class="util-bar-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
-    <span class="util-pct" style="color:${color}">${pct.toFixed(0)}%</span>
-  </div>`;
-}
-
-function getFilteredWeeks(fromId, toId) {
-  const from = document.getElementById(fromId).value;
-  const to = document.getElementById(toId).value;
-  const fi = ALL_WEEKS.indexOf(from), ti = ALL_WEEKS.indexOf(to);
-  return ALL_WEEKS.slice(Math.min(fi,ti), Math.max(fi,ti)+1);
-}
-
-// ===================== UTILISATION PAGE =====================
-function renderUtilisation() {
-  const teamFilter = document.getElementById('team-filter').value;
-  const weeks = getFilteredWeeks('week-range-from','week-range-to');
-
-  if (viewMode === 'team') renderTeamView(teamFilter, weeks);
-  else renderEngineerViewOnMain(teamFilter, weeks);
-}
-
-function aggregateTeamWeekly(teamFilter, weeks) {
-  // returns {team -> {week -> {avail, util}}}
-  const data = {};
-  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
-  for (const t of teams) {
-    data[t] = {};
-    for (const w of weeks) data[t][w] = {avail:0, util:0};
-  }
-  for (const r of RAW.teams) {
-    if (!weeks.includes(r.week)) continue;
-    if (teamFilter!=='ALL' && r.team!==teamFilter) continue;
-    if (!data[r.team]) continue;
-    data[r.team][r.week].avail += r.available_hours;
-    data[r.team][r.week].util += r.utilized_hours;
-  }
-  return data;
-}
-
-function renderTeamView(teamFilter, weeks) {
-  document.getElementById('chart-title').textContent = 'Weekly Utilisation by Team';
-  document.getElementById('table-title').textContent = 'Team Breakdown';
-  const data = aggregateTeamWeekly(teamFilter, weeks);
-  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
-
-  // KPIs
-  let totalAvail=0, totalUtil=0, maxUtil=0, maxTeam='', overCount=0;
-  for (const t of teams) {
-    let ta=0,tu=0;
-    for (const w of weeks) { ta+=data[t][w].avail; tu+=data[t][w].util; }
-    totalAvail+=ta; totalUtil+=tu;
-    const pct = ta>0 ? tu/ta*100 : 0;
-    if (pct>maxUtil) { maxUtil=pct; maxTeam=t; }
-    if (pct>85) overCount++;
-  }
-  const avgUtil = totalAvail>0 ? totalUtil/totalAvail*100 : 0;
-
-  document.getElementById('kpi-grid').innerHTML = `
-    <div class="kpi" style="--kpi-color:var(--accent)">
-      <div class="kpi-label">Avg Utilisation</div>
-      <div class="kpi-value" style="color:${getUtilColor(avgUtil)}">${avgUtil.toFixed(0)}%</div>
-      <div class="kpi-sub">${totalUtil.toFixed(0)} / ${totalAvail.toFixed(0)} hrs</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--red)">
-      <div class="kpi-label">Highest Team</div>
-      <div class="kpi-value" style="font-size:18px;color:${getUtilColor(maxUtil)}">${maxTeam||'—'}</div>
-      <div class="kpi-sub">${maxUtil.toFixed(0)}% utilised</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--orange)">
-      <div class="kpi-label">Teams >85%</div>
-      <div class="kpi-value" style="color:${overCount>0?'var(--orange)':'var(--green)'}">${overCount}</div>
-      <div class="kpi-sub">of ${teams.length} teams</div>
-    </div>
-    <div class="kpi" style="--kpi-color:var(--green)">
-      <div class="kpi-label">Weeks Shown</div>
-      <div class="kpi-value">${weeks.length}</div>
-      <div class="kpi-sub">${weeks[0]} → ${weeks[weeks.length-1]}</div>
-    </div>`;
-
-  // Chart — line per team
-  const palette = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399','#f472b6','#60a5fa','#facc15','#c084fc','#38bdf8','#4ade80','#fbbf24','#f87171'];
-  const datasets = teams.slice(0,15).map((t,i)=>{
-    const pcts = weeks.map(w => {
-      const d = data[t][w];
-      return d.avail>0 ? +(d.util/d.avail*100).toFixed(1) : null;
-    });
-    return { label: t, data: pcts, borderColor: palette[i%palette.length], backgroundColor: palette[i%palette.length]+'22', tension:0.4, pointRadius:3, borderWidth:2, spanGaps:true };
-  });
-
-  drawLineChart('main-chart', weeks, datasets, mainChart, c=>mainChart=c);
-
-  // Table
-  tableRows = teams.map(t => {
-    let ta=0,tu=0;
-    const weekData = weeks.map(w=>{ const d=data[t][w]; ta+=d.avail; tu+=d.util; return d.avail>0?+(d.util/d.avail*100).toFixed(1):0; });
-    const avg = ta>0 ? tu/ta*100 : 0;
-    return { team:t, avg, avail:ta, util:tu, weekData };
-  }).sort((a,b)=>b.avg-a.avg);
-
-  document.getElementById('table-head').innerHTML = `<tr><th onclick="sortTeamTable('team')">Team ↕</th>${weeks.map(w=>`<th>${w.replace('2026 ','')}</th>`).join('')}<th onclick="sortTeamTable('avg')">Avg% ↕</th><th>Status</th></tr>`;
-  renderTeamTableBody(weeks);
-}
-
-function renderTeamTableBody(weeks) {
-  const search = (document.getElementById('table-search').value||'').toLowerCase();
-  const filtered = tableRows.filter(r=>r.team.toLowerCase().includes(search));
-  document.getElementById('table-body').innerHTML = filtered.map(r=>`
-    <tr>
-      <td style="font-weight:600">${r.team}</td>
-      ${r.weekData.map(p=>`<td><span class="mono" style="color:${getUtilColor(p)}">${p>0?p.toFixed(0)+'%':'—'}</span></td>`).join('')}
-      <td>${utilBar(r.avg)}</td>
-      <td>${getBadge(r.avg)}</td>
-    </tr>`).join('') || '<tr><td colspan="20" class="empty">No data</td></tr>';
-}
-
-function filterTable() { renderTeamTableBody(getFilteredWeeks('week-range-from','week-range-to')); }
-
-// ===================== HEATMAP =====================
-function renderHeatmap() {
-  const teamFilter = document.getElementById('heatmap-filter').value;
-  const weeks = ALL_WEEKS;
-  const teams = teamFilter==='ALL' ? ALL_TEAMS : [teamFilter];
-  const data = aggregateTeamWeekly(teamFilter, weeks);
-
-  function hmClass(pct) {
-    if (pct===0) return 'hm-0';
-    if (pct<40) return 'hm-1';
-    if (pct<70) return 'hm-2';
-    if (pct<85) return 'hm-3';
-    if (pct<95) return 'hm-4';
-    return 'hm-5';
-  }
-
-  const shortWeeks = weeks.map(w=>w.replace('2026 ',''));
-  let html = `<table class="heatmap-table"><thead><tr><th></th>${shortWeeks.map(w=>`<th>${w}</th>`).join('')}</tr></thead><tbody>`;
-  for (const t of teams) {
-    html += `<tr><td class="hm-team">${t}</td>`;
-    for (const w of weeks) {
-      const d = data[t][w];
-      const pct = d.avail>0 ? d.util/d.avail*100 : 0;
-      html += `<td class="heatmap-cell ${hmClass(pct)}" title="${t} · ${w}: ${pct.toFixed(1)}%">${pct>0?pct.toFixed(0)+'%':'—'}</td>`;
-    }
-    html += '</tr>';
-  }
-  html += '</tbody></table>';
-  document.getElementById('heatmap-container').innerHTML = html;
-}
-
-// ===================== ENGINEERS PAGE =====================
-function renderEngineers() {
-  const teamFilter = document.getElementById('eng-team-filter').value;
-  const weeks = getFilteredWeeks('eng-week-from','eng-week-to');
-
-  // Aggregate per engineer across weeks
-  const engMap = {};
-  for (const r of RAW.engineers) {
-    if (!weeks.includes(r.week)) continue;
-    if (teamFilter!=='ALL' && r.team!==teamFilter) continue;
-    if (!engMap[r.name]) engMap[r.name] = {name:r.name,team:r.team,job:r.job_title,avail:0,util:0,weeks:{}};
-    engMap[r.name].avail += r.available_hours;
-    engMap[r.name].util += r.utilized_hours;
-    engMap[r.name].weeks[r.week] = (engMap[r.name].weeks[r.week]||0) + r.utilized_hours;
-  }
-
-  const engs = Object.values(engMap).filter(e=>e.avail>0).sort((a,b)=>(b.util/b.avail)-(a.util/a.avail));
-
-  // Chart — top 20
-  const top20 = engs.slice(0,20);
-  const labels = top20.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' '));
-  const pcts = top20.map(e=>+(e.util/e.avail*100).toFixed(1));
-  const colors = pcts.map(p=>getUtilColor(p));
-
-  if (engChart) engChart.destroy();
-  const ctx = document.getElementById('eng-chart').getContext('2d');
-  engChart = new Chart(ctx, {
-    type:'bar',
-    data:{ labels, datasets:[{ label:'Utilisation %', data:pcts, backgroundColor:colors, borderRadius:6 }] },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.raw}% utilised`}} },
-      scales:{
-        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}}, grid:{color:'#2a2f3d'}},
-        y:{min:0,max:100,ticks:{color:'#6b7280',callback:v=>v+'%'}, grid:{color:'#2a2f3d'}}
-      }
-    }
-  });
-
-  // Table
-  engTableRows = engs.map(e=>({...e, pct:e.avail>0?e.util/e.avail*100:0}));
-  document.getElementById('eng-table-head').innerHTML = `<tr><th>Engineer</th><th>Team</th><th>Role</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>`;
-  renderEngTableBody();
-}
-
-function renderEngTableBody() {
-  const search = (document.getElementById('eng-search').value||'').toLowerCase();
-  const filtered = engTableRows.filter(r=>r.name.toLowerCase().includes(search)||r.team.toLowerCase().includes(search));
-  document.getElementById('eng-table-body').innerHTML = filtered.map(r=>`
-    <tr>
-      <td style="font-weight:600">${r.name}</td>
-      <td><span class="badge badge-blue">${r.team}</span></td>
-      <td style="color:var(--muted);font-size:12px">${r.job||'—'}</td>
-      <td class="mono">${r.avail.toFixed(0)}</td>
-      <td class="mono">${r.util.toFixed(0)}</td>
-      <td>${utilBar(r.pct)}</td>
-      <td>${getBadge(r.pct)}</td>
-    </tr>`).join('') || '<tr><td colspan="7" class="empty">No data</td></tr>';
-}
-function filterEngTable() { renderEngTableBody(); }
-
-// ===================== SCENARIO PLANNER =====================
-function addProject() {
-  const name = document.getElementById('proj-name').value.trim();
-  const team = document.getElementById('proj-team').value;
-  const hours = parseFloat(document.getElementById('proj-hours').value);
-  const start = document.getElementById('proj-start').value;
-  const end = document.getElementById('proj-end').value;
-
-  if (!name) { alert('Enter a project name'); return; }
-  if (!hours || hours<=0) { alert('Enter valid hours per week'); return; }
-
-  const si = ALL_WEEKS.indexOf(start), ei = ALL_WEEKS.indexOf(end);
-  const weeksSpan = ALL_WEEKS.slice(Math.min(si,ei), Math.max(si,ei)+1);
-
-  forecastProjects.push({ id: Date.now(), name, team, hours, start, end, weeksSpan });
-  document.getElementById('proj-name').value = '';
-  renderProjectList();
-  renderScenario();
-}
-
-function removeProject(id) {
-  forecastProjects = forecastProjects.filter(p=>p.id!==id);
-  renderProjectList();
-  renderScenario();
-}
-
-function clearProjects() {
-  forecastProjects = [];
-  renderProjectList();
-  renderScenario();
-}
-
-function renderProjectList() {
-  const el = document.getElementById('project-list');
-  const cbWrap = document.getElementById('clear-btn-wrap');
-  if (!forecastProjects.length) {
-    el.innerHTML = '<div class="empty" style="padding:24px">No forecasted projects yet.<br>Add one above to model the impact.</div>';
-    if(cbWrap) cbWrap.style.display='none';
-    return;
-  }
-  if(cbWrap) cbWrap.style.display='block';
-  el.innerHTML = forecastProjects.map(p=>`
-    <div class="project-chip">
-      <div>
-        <div class="project-chip-name">${p.name}</div>
-        <div class="project-chip-meta">${p.team} · ${p.hours}h/wk · ${p.start} → ${p.end}</div>
-      </div>
-      <button class="chip-remove" onclick="removeProject(${p.id})">×</button>
-    </div>`).join('');
-}
-
-function renderScenario() {
-  const selectedTeam = document.getElementById('scenario-team-select').value;
-  const weeks = ALL_WEEKS;
-
-  // Build baseline team utilisation
-  const baseline = {}; // team -> week -> {avail, util}
-  for (const t of ALL_TEAMS) {
-    baseline[t] = {};
-    for (const w of weeks) baseline[t][w] = {avail:0, util:0};
-  }
-  for (const r of RAW.teams) {
-    if (baseline[r.team] && baseline[r.team][r.week]) {
-      baseline[r.team][r.week].avail += r.available_hours;
-      baseline[r.team][r.week].util += r.utilized_hours;
-    }
-  }
-
-  // Build forecast load per team per week
-  const forecastLoad = {}; // team -> week -> extra hours
-  for (const p of forecastProjects) {
-    if (!forecastLoad[p.team]) forecastLoad[p.team] = {};
-    for (const w of p.weeksSpan) {
-      forecastLoad[p.team][w] = (forecastLoad[p.team][w]||0) + p.hours;
-    }
-  }
-
-  // ---- CHART ----
-  const baselinePcts = weeks.map(w => {
-    const d = baseline[selectedTeam]?.[w];
-    return d && d.avail>0 ? +(d.util/d.avail*100).toFixed(1) : null;
-  });
-  const forecastPcts = weeks.map(w => {
-    const d = baseline[selectedTeam]?.[w];
-    if (!d || d.avail===0) return null;
-    const extra = forecastLoad[selectedTeam]?.[w] || 0;
-    return +((d.util+extra)/d.avail*100).toFixed(1);
-  });
-
-  const shortWeeks = weeks.map(w=>w.replace('2026 ',''));
-  if (scenarioChart) scenarioChart.destroy();
-  const ctx = document.getElementById('scenario-chart').getContext('2d');
-  scenarioChart = new Chart(ctx, {
-    type:'line',
-    data:{
-      labels: shortWeeks,
-      datasets:[
-        { label:'Baseline', data:baselinePcts, borderColor:'#4f8ef7', backgroundColor:'#4f8ef722', tension:0.4, borderWidth:2, pointRadius:3, spanGaps:true },
-        { label:'With Forecast', data:forecastPcts, borderColor:'#ef4444', backgroundColor:'#ef444422', borderDash:[6,4], tension:0.4, borderWidth:2, pointRadius:4, spanGaps:true }
-      ]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{
-        legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},
-        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}
-      },
-      scales:{
-        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},
-        y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'},
-           annotations:{ overutil:{ type:'line',yMin:85,yMax:85,borderColor:'#f97316',borderWidth:1,borderDash:[4,4] } }}
-      }
-    }
-  });
-
-  // ---- BOTTLENECK TABLE + ALERTS ----
-  const bottlenecks = [];
-  for (const t of ALL_TEAMS) {
-    for (const w of weeks) {
-      const d = baseline[t]?.[w];
-      if (!d || d.avail===0) continue;
-      const extra = forecastLoad[t]?.[w] || 0;
-      if (extra===0) continue;
-      const basePct = d.util/d.avail*100;
-      const projPct = (d.util+extra)/d.avail*100;
-      if (projPct>85) {
-        bottlenecks.push({ team:t, week:w, basePct, extra, projPct });
-      }
-    }
-  }
-
-  // Alerts
-  const alerts = [];
-  const criticalTeams = {};
-  const warnTeams = {};
-  for (const b of bottlenecks) {
-    if (b.projPct>95) { if(!criticalTeams[b.team]) criticalTeams[b.team]=[]; criticalTeams[b.team].push(b); }
-    else if (b.projPct>85) { if(!warnTeams[b.team]) warnTeams[b.team]=[]; warnTeams[b.team].push(b); }
-  }
-
-  let alertHtml = '';
-  for (const [t,bs] of Object.entries(criticalTeams)) {
-    alertHtml += `<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Projected to exceed 95% in ${bs.length} week(s) — ${bs.map(b=>b.week.replace('2026 ','')).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
-  }
-  for (const [t,bs] of Object.entries(warnTeams)) {
-    alertHtml += `<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">Projected between 85–95% in ${bs.length} week(s) — ${bs.map(b=>b.week.replace('2026 ','')).join(', ')}.</div></div></div>`;
-  }
-  document.getElementById('alert-container').innerHTML = bottlenecks.length
-    ? `<div class="alert-list">${alertHtml}</div>`
-    : (forecastProjects.length ? '<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div><div class="alert-body">All teams remain below 85% with the forecasted projects added.</div></div></div></div>' : '');
-
-  // Table
-  const tbody = document.getElementById('bottleneck-body');
-  if (!bottlenecks.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">${forecastProjects.length ? 'No weeks exceed 85% threshold.' : 'Add a forecasted project to see bottleneck analysis.'}</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = bottlenecks.sort((a,b)=>b.projPct-a.projPct).map(b=>`
-    <tr>
-      <td style="font-weight:600">${b.team}</td>
-      <td class="mono">${b.week.replace('2026 ','')}</td>
-      <td>${utilBar(b.basePct)}</td>
-      <td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td>
-      <td>${utilBar(b.projPct)}</td>
-      <td>${getBadge(b.projPct)}</td>
-    </tr>`).join('');
-}
-
-// ===================== CHART HELPER =====================
-function drawLineChart(canvasId, labels, datasets, existing, setter) {
-  if (existing) existing.destroy();
-  const ctx = document.getElementById(canvasId).getContext('2d');
-  setter(new Chart(ctx, {
-    type:'line',
-    data:{ labels: labels.map(w=>w.replace('2026 ','')), datasets },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      interaction:{ mode:'index', intersect:false },
-      plugins:{
-        legend:{labels:{color:'#e8eaf0',font:{family:'Syne',size:11},boxWidth:12}},
-        tooltip:{ callbacks:{ label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}` } }
-      },
-      scales:{
-        x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},
-        y:{min:0,max:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}
-      }
-    }
-  }));
-}
-
-function sortTeamTable(col) {}
-
-// ===================== KICK OFF =====================
-
-// ── Settings state ────────────────────────────────────────────────────────────
-let SETTINGS = {
-  confirmed: true, tentative: false,
-  employees: true, contractors: true,
-  directors: true, managers: true, staff: true,
-};
-
-function toggleSettings() {
-  document.getElementById('settings-panel').classList.toggle('open');
-  document.getElementById('settings-overlay').classList.toggle('open');
-}
-
-function applySettings() {
-  SETTINGS = {
-    confirmed:   document.getElementById('s-confirmed').checked,
-    tentative:   document.getElementById('s-tentative').checked,
-    employees:   document.getElementById('s-employees').checked,
-    contractors: document.getElementById('s-contractors').checked,
-    directors:   document.getElementById('s-directors').checked,
-    managers:    document.getElementById('s-managers').checked,
-    staff:       document.getElementById('s-staff').checked,
-  };
-  // Re-render all active views
-  renderUtilisation();
-  renderHeatmap();
-  if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
-  renderScenario();
-}
-
-// Filter RAW data through settings
-function getFilteredTeams() {
-  // Build a set of excluded engineer names based on settings
-  const excluded = new Set();
-  for (const e of RAW.engineer_list || []) {
-    if (!SETTINGS.employees && !e.isContractor) { excluded.add(e.name); continue; }
-    if (!SETTINGS.contractors && e.isContractor) { excluded.add(e.name); continue; }
-    if (!SETTINGS.directors && e.seniority === 'director') { excluded.add(e.name); continue; }
-    if (!SETTINGS.managers && e.seniority === 'manager') { excluded.add(e.name); continue; }
-    if (!SETTINGS.staff && e.seniority === 'staff') { excluded.add(e.name); continue; }
-  }
-
-  // Re-aggregate teams from engineers, applying exclusions and tentative toggle
-  const teamsMap = {};
-  for (const r of RAW.engineers) {
-    if (excluded.has(r.name)) continue;
-    const teamKey = `${r.team}|${r.week}`;
-    if (!teamsMap[teamKey]) {
-      teamsMap[teamKey] = { week: r.week, team: r.team, available_hours: 0, utilized_hours: 0, tentative_hours: 0, headcount: 0, _hc: new Set() };
-    }
-    teamsMap[teamKey].available_hours += r.available_hours;
-    teamsMap[teamKey].utilized_hours  += (SETTINGS.confirmed ? r.utilized_hours : 0);
-    teamsMap[teamKey].tentative_hours += (SETTINGS.tentative ? (r.tentative_hours || 0) : 0);
-    teamsMap[teamKey]._hc.add(r.name);
-  }
-
-  return Object.values(teamsMap).map(({ _hc, ...rest }) => ({
-    ...rest,
-    utilized_hours: rest.utilized_hours + rest.tentative_hours,
-    headcount: _hc.size,
-  }));
-}
-
-function getFilteredEngineers() {
-  const excluded = new Set();
-  for (const e of RAW.engineer_list || []) {
-    if (!SETTINGS.employees && !e.isContractor) { excluded.add(e.name); continue; }
-    if (!SETTINGS.contractors && e.isContractor) { excluded.add(e.name); continue; }
-    if (!SETTINGS.directors && e.seniority === 'director') { excluded.add(e.name); continue; }
-    if (!SETTINGS.managers && e.seniority === 'manager') { excluded.add(e.name); continue; }
-    if (!SETTINGS.staff && e.seniority === 'staff') { excluded.add(e.name); continue; }
-  }
-  return RAW.engineers.filter(e => !excluded.has(e.name)).map(e => ({
-    ...e,
-    utilized_hours: (SETTINGS.confirmed ? e.utilized_hours : 0) + (SETTINGS.tentative ? (e.tentative_hours || 0) : 0),
-  }));
-}
-
-// ── Scenario planner state ────────────────────────────────────────────────────
-let forecastProjects = [];
-let addPersonForecast = null; // { team, count, hoursPerWeek }
-let scenarioViewMode = 'utilisation'; // 'utilisation' | 'gantt'
-let phaseCounter = 0;
-
-function setScenarioView(mode) {
-  scenarioViewMode = mode;
-  document.querySelectorAll('#scenario-view-toggle .pill').forEach((p, i) => {
-    p.classList.toggle('active', (i===0&&mode==='utilisation')||(i===1&&mode==='gantt'));
-  });
-  document.getElementById('scenario-utilisation-view').style.display = mode === 'utilisation' ? 'block' : 'none';
-  document.getElementById('scenario-gantt-view').style.display = mode === 'gantt' ? 'block' : 'none';
-  renderScenario();
-}
-
-// Add a phase row to the project builder
-function addPhase() {
-  phaseCounter++;
-  const id = phaseCounter;
-  const teams = ALL_TEAMS.map(t => `<option value="${t}">${t}</option>`).join('');
-  const div = document.createElement('div');
-  div.id = `phase-${id}`;
-  div.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
-  div.innerHTML = `
-    <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
-    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-      <div>
-        <div class="form-label">Team</div>
-        <select class="form-input" id="phase-team-${id}" style="cursor:pointer">${teams}</select>
-      </div>
-      <div>
-        <div class="form-label">Hours/Week</div>
-        <input class="form-input" id="phase-hours-${id}" type="number" min="1" max="500" placeholder="e.g. 80">
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-      <div>
-        <div class="form-label">Start</div>
-        <select class="form-input" id="phase-start-type-${id}" onchange="togglePhaseStart(${id})" style="cursor:pointer">
-          <option value="offset">Week offset</option>
-          <option value="date">Specific date</option>
-          <option value="with">Same time as…</option>
-        </select>
-      </div>
-      <div id="phase-start-input-${id}">
-        <div class="form-label">Offset (weeks)</div>
-        <input class="form-input" id="phase-offset-${id}" type="number" min="0" value="0" placeholder="0 = project start">
-      </div>
-      <div>
-        <div class="form-label">Duration</div>
-        <div style="display:flex;gap:4px">
-          <input class="form-input" id="phase-dur-${id}" type="number" min="1" value="4" style="flex:1">
-          <select class="form-input" id="phase-dur-unit-${id}" style="cursor:pointer;width:auto;padding:9px 8px">
-            <option value="weeks">wks</option>
-            <option value="days">days</option>
-          </select>
-        </div>
-      </div>
-    </div>
-    <div id="phase-with-select-${id}" style="display:none">
-      <div class="form-label">Start together with phase</div>
-      <select class="form-input" id="phase-with-${id}" style="cursor:pointer">
-        <option value="">— select phase —</option>
-      </select>
-    </div>`;
-  document.getElementById('phase-list').appendChild(div);
-  updateWithOptions();
-}
-
-function removePhase(id) {
-  document.getElementById(`phase-${id}`)?.remove();
-  updateWithOptions();
-}
-
-function togglePhaseStart(id) {
-  const type = document.getElementById(`phase-start-type-${id}`).value;
-  const inputDiv = document.getElementById(`phase-start-input-${id}`);
-  const withDiv  = document.getElementById(`phase-with-select-${id}`);
-  if (type === 'offset') {
-    inputDiv.innerHTML = '<div class="form-label">Offset (weeks)</div><input class="form-input" id="phase-offset-' + id + '" type="number" min="0" value="0">';
-    withDiv.style.display = 'none';
-  } else if (type === 'date') {
-    inputDiv.innerHTML = '<div class="form-label">Start Date</div><input class="form-input" id="phase-offset-' + id + '" type="date">';
-    withDiv.style.display = 'none';
-  } else {
-    inputDiv.innerHTML = '';
-    withDiv.style.display = 'block';
-  }
-}
-
-function updateWithOptions() {
-  const phases = [...document.querySelectorAll('[id^="phase-"]')].filter(el => el.id.match(/^phase-\d+$/));
-  phases.forEach(phaseEl => {
-    const id = phaseEl.id.replace('phase-', '');
-    const sel = document.getElementById(`phase-with-${id}`);
-    if (!sel) return;
-    const others = phases.filter(p => p.id !== `phase-${id}`);
-    sel.innerHTML = '<option value="">— select phase —</option>' +
-      others.map(p => {
-        const pid = p.id.replace('phase-','');
-        const team = document.getElementById(`phase-team-${pid}`)?.value || `Phase ${pid}`;
-        return `<option value="${pid}">Phase ${pid} (${team})</option>`;
-      }).join('');
-  });
-}
-
-function addProject() {
-  const name = document.getElementById('proj-name').value.trim();
-  const startDate = document.getElementById('proj-start-date').value;
-  const endDate   = document.getElementById('proj-end-date').value;
-  if (!name) { alert('Enter a project name'); return; }
-  if (!startDate) { alert('Enter a project start date'); return; }
-
-  // Collect phases
-  const phaseEls = [...document.querySelectorAll('[id^="phase-"]')].filter(el => el.id.match(/^phase-\d+$/));
-  if (phaseEls.length === 0) { alert('Add at least one team phase'); return; }
-
-  const phases = [];
-  const projectStartMs = new Date(startDate).getTime();
-
-  // First pass: compute absolute start dates
-  const phaseAbsoluteStarts = {};
-  phaseEls.forEach(phaseEl => {
-    const id = phaseEl.id.replace('phase-', '');
-    const team    = document.getElementById(`phase-team-${id}`)?.value;
-    const hours   = parseFloat(document.getElementById(`phase-hours-${id}`)?.value || 0);
-    const durVal  = parseFloat(document.getElementById(`phase-dur-${id}`)?.value || 1);
-    const durUnit = document.getElementById(`phase-dur-unit-${id}`)?.value || 'weeks';
-    const durWeeks = durUnit === 'days' ? durVal / 5 : durVal;
-    const startType = document.getElementById(`phase-start-type-${id}`)?.value || 'offset';
-
-    let phaseStartMs = projectStartMs;
-    if (startType === 'offset') {
-      const offsetWeeks = parseFloat(document.getElementById(`phase-offset-${id}`)?.value || 0);
-      phaseStartMs = projectStartMs + offsetWeeks * 7 * 24 * 3600 * 1000;
-    } else if (startType === 'date') {
-      const dateVal = document.getElementById(`phase-offset-${id}`)?.value;
-      if (dateVal) phaseStartMs = new Date(dateVal).getTime();
-    } else if (startType === 'with') {
-      const withId = document.getElementById(`phase-with-${id}`)?.value;
-      phaseAbsoluteStarts[id] = { waitFor: withId, durWeeks, team, hours };
-      return;
-    }
-    phaseAbsoluteStarts[id] = { startMs: phaseStartMs, durWeeks, team, hours };
-  });
-
-  // Second pass: resolve "same as" references
-  Object.entries(phaseAbsoluteStarts).forEach(([id, p]) => {
-    if (p.waitFor) {
-      const ref = phaseAbsoluteStarts[p.waitFor];
-      phaseAbsoluteStarts[id].startMs = ref?.startMs || projectStartMs;
-    }
-  });
-
-  // Build week-level arrays for each phase
-  Object.entries(phaseAbsoluteStarts).forEach(([id, p]) => {
-    if (!p.team || !p.hours) return;
-    const weeksSpan = [];
-    let cur = new Date(p.startMs);
-    const totalWeeks = Math.ceil(p.durWeeks);
-    for (let i = 0; i < totalWeeks; i++) {
-      weeksSpan.push(toWeekLabel(cur));
-      cur.setDate(cur.getDate() + 7);
-    }
-    phases.push({ id, team: p.team, hours: p.hours, weeksSpan,
-      startDate: new Date(p.startMs).toISOString().slice(0,10),
-      durWeeks: p.durWeeks });
-  });
-
-  forecastProjects.push({ id: Date.now(), name, startDate, endDate, phases });
-  document.getElementById('proj-name').value = '';
-  document.getElementById('phase-list').innerHTML = '';
-  phaseCounter = 0;
-  renderProjectList();
-  renderScenario();
-}
-
-function removeProject(id) {
-  forecastProjects = forecastProjects.filter(p => p.id !== id);
-  renderProjectList();
-  renderScenario();
-}
-
-function clearProjects() {
-  forecastProjects = [];
-  renderProjectList();
-  renderScenario();
-}
-
-function applyAddPerson() {
-  const team  = document.getElementById('addperson-team').value;
-  const count = parseInt(document.getElementById('addperson-count').value || 1);
-  const hours = parseFloat(document.getElementById('addperson-hours').value || 40);
-  addPersonForecast = { team, count, hoursPerWeek: hours };
-  document.getElementById('addperson-status').textContent =
-    `Adding ${count} person(s) to ${team} (+${(count * hours).toFixed(0)}h/wk available)`;
-  renderScenario();
-}
-
-function clearAddPerson() {
-  addPersonForecast = null;
-  document.getElementById('addperson-status').textContent = '';
-  renderScenario();
-}
-
-function renderProjectList() {
-  const el = document.getElementById('project-list');
-  const cbWrap = document.getElementById('clear-btn-wrap');
-  if (!forecastProjects.length) {
-    el.innerHTML = '<div class="empty" style="padding:24px">No projects yet.</div>';
-    if (cbWrap) cbWrap.style.display = 'none';
-    return;
-  }
-  if (cbWrap) cbWrap.style.display = 'block';
-  el.innerHTML = forecastProjects.map(p => `
-    <div class="project-chip">
-      <div>
-        <div class="project-chip-name">${p.name}</div>
-        <div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s): ${p.phases.map(ph => ph.team + ' ' + ph.hours + 'h/wk').join(', ')}</div>
-      </div>
-      <button class="chip-remove" onclick="removeProject(${p.id})">×</button>
-    </div>`).join('');
-}
-
-// ── Gantt renderer ────────────────────────────────────────────────────────────
-function renderGantt() {
-  const container = document.getElementById('gantt-container');
-  if (!forecastProjects.length) {
-    container.innerHTML = '<div class="empty">Add a project to see the Gantt chart.</div>';
-    return;
-  }
-
-  const allWeeksSet = new Set();
-  forecastProjects.forEach(p => p.phases.forEach(ph => ph.weeksSpan.forEach(w => allWeeksSet.add(w))));
-  const ganttWeeks = [...allWeeksSet].sort();
-  if (!ganttWeeks.length) return;
-
-  const palette = ['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399'];
-  let html = `<table style="border-collapse:separate;border-spacing:2px;min-width:100%">`;
-  html += `<thead><tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);background:transparent;white-space:nowrap">Project / Phase</th>`;
-  ganttWeeks.forEach(w => {
-    html += `<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:36px">${w.replace(/\d+ /,'')}</th>`;
-  });
-  html += '</tr></thead><tbody>';
-
-  forecastProjects.forEach((proj, pi) => {
-    html += `<tr><td colspan="${ganttWeeks.length + 1}" style="padding:8px 10px 4px;font-size:12px;font-weight:700;color:var(--text)">${proj.name}</td></tr>`;
-    proj.phases.forEach((phase, phi) => {
-      const color = palette[(pi * 3 + phi) % palette.length];
-      html += `<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${phase.team}</td>`;
-      ganttWeeks.forEach(w => {
-        const active = phase.weeksSpan.includes(w);
-        html += `<td style="height:28px;border-radius:4px;background:${active ? color + '55' : 'transparent'};border:${active ? '1px solid ' + color : '1px solid transparent'};text-align:center">`;
-        if (active) html += `<span style="font-size:9px;color:${color};font-family:'DM Mono',monospace">${phase.hours}h</span>`;
-        html += '</td>';
-      });
-      html += '</tr>';
-    });
-  });
-
-  html += '</tbody></table>';
-  container.innerHTML = html;
-}
-
-// ── Scenario planner main renderer ────────────────────────────────────────────
-function renderScenario() {
-  const filteredTeams = getFilteredTeams();
-  const weeks = ALL_WEEKS;
-
-  // Build baseline from filtered teams
-  const baseline = {};
-  for (const t of ALL_TEAMS) {
-    baseline[t] = {};
-    for (const w of weeks) baseline[t][w] = { avail: 0, util: 0 };
-  }
-  for (const r of filteredTeams) {
-    if (baseline[r.team] && baseline[r.team][r.week] !== undefined) {
-      baseline[r.team][r.week].avail += r.available_hours;
-      baseline[r.team][r.week].util  += r.utilized_hours;
-    }
-  }
-
-  // Apply add-person forecast (increases available hours)
-  if (addPersonForecast) {
-    const { team, count, hoursPerWeek } = addPersonForecast;
-    for (const w of weeks) {
-      if (baseline[team] && baseline[team][w]) {
-        baseline[team][w].avail += count * hoursPerWeek;
-      }
-    }
-  }
-
-  // Build forecast load from projects
-  const forecastLoad = {};
-  for (const proj of forecastProjects) {
-    for (const phase of proj.phases) {
-      if (!forecastLoad[phase.team]) forecastLoad[phase.team] = {};
-      for (const w of phase.weeksSpan) {
-        forecastLoad[phase.team][w] = (forecastLoad[phase.team][w] || 0) + phase.hours;
-      }
-    }
-  }
-
-  // Gantt
-  if (scenarioViewMode === 'gantt') { renderGantt(); }
-
-  // Utilisation chart
-  const selectedTeam = document.getElementById('scenario-team-select').value || ALL_TEAMS[0];
-  const baselinePcts = weeks.map(w => {
-    const d = baseline[selectedTeam]?.[w];
-    return d && d.avail > 0 ? +(d.util / d.avail * 100).toFixed(1) : null;
-  });
-  const forecastPcts = weeks.map(w => {
-    const d = baseline[selectedTeam]?.[w];
-    if (!d || d.avail === 0) return null;
-    const extra = forecastLoad[selectedTeam]?.[w] || 0;
-    return +((d.util + extra) / d.avail * 100).toFixed(1);
-  });
-
-  const shortWeeks = weeks.map(w => w.replace('2026 ', ''));
-  if (scenarioChart) scenarioChart.destroy();
-  const ctx = document.getElementById('scenario-chart').getContext('2d');
-  scenarioChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: shortWeeks,
-      datasets: [
-        { label: 'Baseline', data: baselinePcts, borderColor: '#4f8ef7', backgroundColor: '#4f8ef722', tension: 0.4, borderWidth: 2, pointRadius: 3, spanGaps: true },
-        { label: 'With Forecast', data: forecastPcts, borderColor: '#ef4444', backgroundColor: '#ef444422', borderDash: [6, 4], tension: 0.4, borderWidth: 2, pointRadius: 4, spanGaps: true },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#e8eaf0', font: { family: 'Syne' } } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw ?? '—'}%` } },
-      },
-      scales: {
-        x: { ticks: { color: '#6b7280', font: { family: 'DM Mono', size: 11 } }, grid: { color: '#2a2f3d' } },
-        y: { min: 0, ticks: { color: '#6b7280', callback: v => v + '%' }, grid: { color: '#2a2f3d' } },
-      },
-    },
-  });
-
-  // Bottleneck table
-  const bottlenecks = [];
-  for (const t of ALL_TEAMS) {
-    for (const w of weeks) {
-      const d = baseline[t]?.[w];
-      if (!d || d.avail === 0) continue;
-      const extra = forecastLoad[t]?.[w] || 0;
-      if (extra === 0 && !addPersonForecast) continue;
-      const basePct = d.util / d.avail * 100;
-      const projPct = (d.util + extra) / d.avail * 100;
-      if (projPct > 85) bottlenecks.push({ team: t, week: w, basePct, extra, projPct });
-    }
-  }
-
-  // Alerts
-  const critT = {}, warnT = {};
-  for (const b of bottlenecks) {
-    if (b.projPct > 95) { (critT[b.team] = critT[b.team] || []).push(b); }
-    else { (warnT[b.team] = warnT[b.team] || []).push(b); }
-  }
-  let alertHtml = '';
-  for (const [t, bs] of Object.entries(critT)) {
-    alertHtml += `<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} week(s): ${bs.map(b => b.week.replace('2026 ', '')).join(', ')}. Peak: ${Math.max(...bs.map(b => b.projPct)).toFixed(0)}%</div></div></div>`;
-  }
-  for (const [t, bs] of Object.entries(warnT)) {
-    alertHtml += `<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} week(s): ${bs.map(b => b.week.replace('2026 ', '')).join(', ')}.</div></div></div>`;
-  }
-  document.getElementById('alert-container').innerHTML = bottlenecks.length
-    ? `<div class="alert-list">${alertHtml}</div>`
-    : (forecastProjects.length || addPersonForecast ? '<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div><div class="alert-body">All teams remain below 85% with the current scenario.</div></div></div></div>' : '');
-
-  const tbody = document.getElementById('bottleneck-body');
-  if (!bottlenecks.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">${forecastProjects.length || addPersonForecast ? 'No weeks exceed 85%.' : 'Add a project to see bottleneck analysis.'}</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = bottlenecks.sort((a, b) => b.projPct - a.projPct).map(b => `
-    <tr>
-      <td style="font-weight:600">${b.team}</td>
-      <td class="mono">${b.week.replace('2026 ', '')}</td>
-      <td>${utilBar(b.basePct)}</td>
-      <td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td>
-      <td>${utilBar(b.projPct)}</td>
-      <td>${getBadge(b.projPct)}</td>
-    </tr>`).join('');
-}
-
-// ── Override aggregateTeamWeekly to use filtered data ─────────────────────────
-function aggregateTeamWeekly(teamFilter, weeks) {
-  const filteredTeams = getFilteredTeams();
-  const data = {};
-  const teams = teamFilter === 'ALL' ? ALL_TEAMS : [teamFilter];
-  for (const t of teams) {
-    data[t] = {};
-    for (const w of weeks) data[t][w] = { avail: 0, util: 0 };
-  }
-  for (const r of filteredTeams) {
-    if (!weeks.includes(r.week)) continue;
-    if (teamFilter !== 'ALL' && r.team !== teamFilter) continue;
-    if (!data[r.team]) continue;
-    data[r.team][r.week].avail += r.available_hours;
-    data[r.team][r.week].util  += r.utilized_hours;
-  }
-  return data;
-}
-
-// Override renderEngineers to use filtered engineers
-const _origRenderEngineers = renderEngineers;
-function renderEngineers() {
-  const teamFilter = document.getElementById('eng-team-filter').value;
-  const weeks = getFilteredWeeks('eng-week-from', 'eng-week-to');
-  const filteredEngs = getFilteredEngineers();
-
-  const engMap = {};
-  for (const r of filteredEngs) {
-    if (!weeks.includes(r.week)) continue;
-    if (teamFilter !== 'ALL' && r.team !== teamFilter) continue;
-    if (!engMap[r.name]) engMap[r.name] = { name: r.name, team: r.team, job: r.job_title, avail: 0, util: 0 };
-    engMap[r.name].avail += r.available_hours;
-    engMap[r.name].util  += r.utilized_hours;
-  }
-
-  const engs = Object.values(engMap).filter(e => e.avail > 0).sort((a, b) => (b.util / b.avail) - (a.util / a.avail));
-  const top20 = engs.slice(0, 20);
-  const labels = top20.map(e => e.name.split(' ').map((w, i) => i === 0 ? w[0] + '.' : w).join(' '));
-  const pcts = top20.map(e => +(e.util / e.avail * 100).toFixed(1));
-  const colors = pcts.map(p => getUtilColor(p));
-
-  if (engChart) engChart.destroy();
-  const ctx = document.getElementById('eng-chart').getContext('2d');
-  engChart = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: 'Utilisation %', data: pcts, backgroundColor: colors, borderRadius: 6 }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw}% utilised` } } },
-      scales: {
-        x: { ticks: { color: '#6b7280', font: { family: 'DM Mono', size: 11 } }, grid: { color: '#2a2f3d' } },
-        y: { min: 0, max: 100, ticks: { color: '#6b7280', callback: v => v + '%' }, grid: { color: '#2a2f3d' } },
-      },
-    },
-  });
-
-  engTableRows = engs.map(e => ({ ...e, pct: e.avail > 0 ? e.util / e.avail * 100 : 0 }));
-  document.getElementById('eng-table-head').innerHTML = `<tr><th>Engineer</th><th>Team</th><th>Role</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>`;
-  renderEngTableBody();
-}
-
-// ── AI panel state ────────────────────────────────────────────────────────────
-let aiConversationHistory = [];
-
-function setPrompt(text) {
-  document.getElementById('ai-input').value = text;
-  document.getElementById('ai-input').focus();
-}
-
-function appendAiMessage(role, content, isLoading = false) {
-  const container = document.getElementById('ai-messages');
-  const div = document.createElement('div');
-  div.className = `ai-msg ai-msg-${role}`;
-  if (isLoading) div.id = 'ai-loading-msg';
-  div.innerHTML = `<div class="ai-msg-bubble">${isLoading ? '<span class="ai-typing">●●●</span>' : content.replace(/\n/g, '<br>')}</div>`;
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-  return div;
-}
-
-function removeLoadingMsg() {
-  const el = document.getElementById('ai-loading-msg');
-  if (el) el.remove();
-}
-
-async function sendAiMessage() {
-  const input = document.getElementById('ai-input');
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  appendAiMessage('user', text);
-  aiConversationHistory.push({ role: 'user', content: text });
-  appendAiMessage('assistant', '', true);
-  try {
-    const weeks = ALL_WEEKS.length;
-    const teams = ALL_TEAMS.length;
-    const engs  = [...new Set(RAW.engineers.map(e => e.name))].length;
-    const teamSummary = ALL_TEAMS.map(t => {
-      const rows = RAW.teams.filter(r => r.team === t);
-      const ta = rows.reduce((s, r) => s + r.available_hours, 0);
-      const tu = rows.reduce((s, r) => s + r.utilized_hours, 0);
-      return `${t}: ${ta > 0 ? (tu / ta * 100).toFixed(0) : 0}%`;
-    }).join('; ');
-    const fullDataStr = JSON.stringify(RAW.teams.map(r => ({ w: r.week.replace('2026 ', ''), t: r.team, a: Math.round(r.available_hours), u: Math.round(r.utilized_hours) })));
-    const systemPrompt = `You are a resource planning expert. Data: ${weeks} weeks, ${teams} teams, ${engs} engineers. Team utilisation: ${teamSummary}. Full data: ${fullDataStr}. Answer concisely using week numbers (W14, W15...).`;
-    const response = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system: systemPrompt, messages: aiConversationHistory }),
-    });
-    const data = await response.json();
-    removeLoadingMsg();
-    if (!response.ok || data.error) { appendAiMessage('assistant', `⚠️ ${data.error || 'Error'}`); aiConversationHistory.pop(); return; }
-    const reply = data.content?.[0]?.text || 'No response';
-    aiConversationHistory.push({ role: 'assistant', content: reply });
-    appendAiMessage('assistant', reply);
-    if (aiConversationHistory.length > 20) aiConversationHistory = aiConversationHistory.slice(-20);
-  } catch (err) {
-    removeLoadingMsg();
-    appendAiMessage('assistant', `⚠️ ${err.message}`);
-  }
-}
-
-// ── Status + live clock ───────────────────────────────────────────────────────
-let _clockInterval = null;
-
-function setStatus(state, text) {
-  const dot  = document.getElementById('status-dot');
-  const span = document.getElementById('status-text');
-  if (!dot || !span) return;
-  const colors = { loading: '#f59e0b', ok: '#22c55e', error: '#ef4444' };
-  dot.style.background = colors[state] || '#6b7280';
-  if (state === 'ok') {
-    if (_clockInterval) clearInterval(_clockInterval);
-    function tick() {
-      const n = new Date();
-      const t = [n.getHours(), n.getMinutes(), n.getSeconds()].map(x => String(x).padStart(2, '0')).join(':');
-      if (span) span.textContent = `Live · ${t}`;
-    }
-    tick();
-    _clockInterval = setInterval(tick, 1000);
-  } else {
-    if (_clockInterval) { clearInterval(_clockInterval); _clockInterval = null; }
-    span.textContent = text;
-  }
-}
-
-// ── Live data loading ─────────────────────────────────────────────────────────
-async function loadLiveData() {
-  setStatus('loading', 'Fetching from Resource Guru...');
-  try {
-    const res = await fetch('/api/utilisation');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    // Skip re-render if data hasn't changed
-    const newSig = data.meta?.fetched_at;
-    if (newSig && newSig === RAW.meta?.fetched_at) {
-      setStatus('ok', '');
-      setTimeout(loadLiveData, 300000);
-      return;
-    }
-
-    const savedTeam = document.getElementById('team-filter')?.value;
-    RAW = data;
-    window.RAW = RAW;
-    setStatus('ok', '');
-
-    const infoEl = document.getElementById('ai-data-info');
-    if (infoEl) {
-      const engs  = [...new Set(RAW.engineers.map(e => e.name))].length;
-      const wks   = [...new Set(RAW.teams.map(r => r.week))].sort();
-      infoEl.textContent = `${engs} engineers · ${[...new Set(RAW.teams.map(r => r.team))].length} teams · ${wks.length} weeks`;
-    }
-
-    init();
-
-    // Restore selected team
-    if (savedTeam && savedTeam !== 'ALL') {
-      document.getElementById('team-filter').value = savedTeam;
-      renderUtilisation();
-    }
-
-    const weeksLoaded = [...new Set((data.teams || []).map(r => r.week))].length;
-    setTimeout(loadLiveData, weeksLoaded < 10 ? 45000 : 300000);
-  } catch (err) {
-    setStatus('error', 'Failed to load live data');
-    console.error('loadLiveData error:', err);
-    const kpiGrid = document.getElementById('kpi-grid');
-    if (kpiGrid) kpiGrid.innerHTML = `<div class="chart-card" style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)"><div style="font-size:20px;margin-bottom:12px">⚠️</div><div style="font-weight:700;margin-bottom:8px">Could not connect to proxy server</div><div style="font-size:12px;margin-top:8px;color:#4f8ef7;cursor:pointer" onclick="loadLiveData()">↻ Retry</div></div>`;
-    setTimeout(loadLiveData, 30000);
-  }
-}
-
-// ── Override populateSelects to also populate new scenario selects ────────────
-const _origPopulate = populateSelects;
-function populateSelects() {
-  _origPopulate();
-  // Add person team select
-  const ap = document.getElementById('addperson-team');
-  if (ap) ap.innerHTML = ALL_TEAMS.map(t => `<option value="${t}">${t}</option>`).join('');
-}
-
-// Boot
-loadLiveData();
-</script>
 <!-- AI INSIGHTS PAGE -->
 <div class="page" id="page-ai">
   <div class="page-header">
@@ -1759,60 +377,28 @@ loadLiveData();
       <div class="page-subtitle">Ask Claude about your resource data, forecasts, and capacity planning</div>
     </div>
   </div>
-
   <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">
-
-    <!-- Chat area -->
     <div class="chart-card" style="display:flex;flex-direction:column;height:600px">
       <div id="ai-messages" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-bottom:8px">
         <div class="ai-msg ai-msg-assistant">
-          <div class="ai-msg-bubble">
-            👋 Hi! I have access to your full Resource Guru utilisation data.
-            Ask me anything — bottleneck analysis, capacity windows, headcount recommendations, project timing, and more.
-          </div>
+          <div class="ai-msg-bubble">👋 Hi! I have access to your Resource Guru utilisation data. Ask me about bottlenecks, capacity windows, project timing, or headcount planning.</div>
         </div>
       </div>
       <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px;display:flex;gap:10px">
-        <input
-          id="ai-input"
-          class="form-input"
-          style="flex:1"
-          placeholder="e.g. Which teams are at risk of bottlenecks this summer?"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAiMessage()}"
-        />
+        <input id="ai-input" class="form-input" style="flex:1" placeholder="e.g. Which teams are at risk of bottlenecks this summer?" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAiMessage()}"/>
         <button class="btn btn-primary" style="width:80px;padding:9px 0" onclick="sendAiMessage()">Send</button>
       </div>
     </div>
-
-    <!-- Quick prompts panel -->
     <div>
       <div class="form-card">
         <div class="form-title">Quick Prompts</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('Which teams are projected to exceed 85% utilisation in the next 8 weeks?')">
-            🔥 Bottleneck scan — next 8 weeks
-          </button>
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('Which weeks have the most spare capacity across all teams? I want to find a good window to start a new project.')">
-            📅 Best window for a new project
-          </button>
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('Summarise overall utilisation health across all teams. Flag any critical concerns.')">
-            📊 Overall health summary
-          </button>
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('Which individual engineers have the most spare capacity? List the top 5 least-utilised engineers who could take on more work.')">
-            👤 Under-utilised engineers
-          </button>
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('If I need 40 hours/week from the PLC team and 20 hours/week from the Electrical Installation team for a 10-week project, when is the safest time to start?')">
-            ⚡ Project capacity check
-          </button>
-          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500"
-            onclick="setPrompt('Compare the Service team vs the PLC team utilisation trends over the next 3 months. Which is more at risk?')">
-            ⚖️ Compare two teams
-          </button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('Which teams are projected to exceed 85% utilisation in the next 8 weeks?')">🔥 Bottleneck scan — next 8 weeks</button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('Which weeks have the most spare capacity across all teams? I want to find a window to start a new project.')">📅 Best window for a new project</button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('Summarise overall utilisation health across all teams. Flag any critical concerns.')">📊 Overall health summary</button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('Which individual engineers have the most spare capacity? List the top 5 least-utilised.')">👤 Under-utilised engineers</button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('If I need 40 hours/week from the PLC team and 20 hours/week from Electrical Installation for a 10-week project, when is the safest time to start?')">⚡ Project capacity check</button>
+          <button class="btn" style="text-align:left;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500" onclick="setPrompt('Compare Service vs PLC team utilisation trends over the next 3 months.')">⚖️ Compare two teams</button>
         </div>
         <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
           <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.06em">Data snapshot</div>
@@ -1823,82 +409,596 @@ loadLiveData();
   </div>
 </div>
 
-
-<!-- SETTINGS OVERLAY + PANEL -->
+<!-- SETTINGS PANEL -->
 <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
 <div class="settings-panel" id="settings-panel">
-  <div class="settings-header">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
     <div style="font-size:16px;font-weight:800">⚙️ Dashboard Settings</div>
-    <button class="settings-close" onclick="toggleSettings()">✕</button>
+    <button onclick="toggleSettings()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">✕</button>
   </div>
-
   <div class="settings-section">
     <div class="settings-section-title">Booking Type</div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Confirmed Bookings</div>
-        <div class="settings-row-desc">Firm bookings count toward utilisation</div>
-      </div>
+      <div><div class="settings-row-label">Include Confirmed Bookings</div><div class="settings-row-desc">Firm bookings count toward utilisation</div></div>
       <label class="toggle"><input type="checkbox" id="s-confirmed" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Tentative Bookings</div>
-        <div class="settings-row-desc">Tentative (waiting list) hours shown in orange</div>
-      </div>
+      <div><div class="settings-row-label">Include Tentative Bookings</div><div class="settings-row-desc">Waiting list / tentative hours</div></div>
       <label class="toggle"><input type="checkbox" id="s-tentative" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
-
   <div class="settings-section">
     <div class="settings-section-title">Resource Type</div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Employees</div>
-        <div class="settings-row-desc">Regular permanent staff</div>
-      </div>
+      <div><div class="settings-row-label">Include Employees</div><div class="settings-row-desc">Permanent staff</div></div>
       <label class="toggle"><input type="checkbox" id="s-employees" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Contractors</div>
-        <div class="settings-row-desc">Contract / freelance workers</div>
-      </div>
+      <div><div class="settings-row-label">Include Contractors</div><div class="settings-row-desc">Contract / freelance workers</div></div>
       <label class="toggle"><input type="checkbox" id="s-contractors" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
-
   <div class="settings-section">
     <div class="settings-section-title">Seniority Level</div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Directors</div>
-        <div class="settings-row-desc">Director-level staff</div>
-      </div>
+      <div><div class="settings-row-label">Include Directors</div></div>
       <label class="toggle"><input type="checkbox" id="s-directors" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Managers</div>
-        <div class="settings-row-desc">Manager / Head of level staff</div>
-      </div>
+      <div><div class="settings-row-label">Include Managers / Heads of</div></div>
       <label class="toggle"><input type="checkbox" id="s-managers" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
     <div class="settings-row">
-      <div>
-        <div class="settings-row-label">Include Staff</div>
-        <div class="settings-row-desc">Regular engineers and team members</div>
-      </div>
+      <div><div class="settings-row-label">Include Staff</div></div>
       <label class="toggle"><input type="checkbox" id="s-staff" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
-
-  <div class="settings-note">
-    ⚠️ Contractor and tentative data requires the full booking fields from Resource Guru.
-    If contractors all show as employees, check that resource types are configured in your RG account.
-    Settings are applied immediately across all dashboard tabs.
-  </div>
+  <div class="settings-note">Contractor detection requires Resource Guru resource types to be configured. If all show as employees, check resource types in your RG account settings. Changes apply instantly across all tabs.</div>
 </div>
 
+<script>
+// ── Data ──────────────────────────────────────────────────────────────────────
+let RAW = { teams:[], engineers:[], engineer_list:[] };
+let ALL_WEEKS = [];
+let ALL_TEAMS = [];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let viewMode = 'team';
+let mainChart = null, engChart = null, scenarioChart = null;
+let forecastProjects = [];
+let addPersonForecast = null;
+let scenarioViewMode = 'utilisation';
+let phaseCounter = 0;
+let tableRows = [];
+let engTableRows = [];
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true };
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function toggleSettings() {
+  document.getElementById('settings-panel').classList.toggle('open');
+  document.getElementById('settings-overlay').classList.toggle('open');
+}
+function applySettings() {
+  SETTINGS = {
+    confirmed:   document.getElementById('s-confirmed').checked,
+    tentative:   document.getElementById('s-tentative').checked,
+    employees:   document.getElementById('s-employees').checked,
+    contractors: document.getElementById('s-contractors').checked,
+    directors:   document.getElementById('s-directors').checked,
+    managers:    document.getElementById('s-managers').checked,
+    staff:       document.getElementById('s-staff').checked,
+  };
+  renderUtilisation(); renderHeatmap();
+  if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
+  renderScenario();
+}
+
+// ── Filtered data helpers ─────────────────────────────────────────────────────
+function getExcludedNames() {
+  const ex = new Set();
+  for (const e of RAW.engineer_list||[]) {
+    if (!SETTINGS.employees && !e.isContractor) { ex.add(e.name); continue; }
+    if (!SETTINGS.contractors && e.isContractor) { ex.add(e.name); continue; }
+    if (!SETTINGS.directors && e.seniority==='director') { ex.add(e.name); continue; }
+    if (!SETTINGS.managers && e.seniority==='manager') { ex.add(e.name); continue; }
+    if (!SETTINGS.staff && e.seniority==='staff') { ex.add(e.name); continue; }
+  }
+  return ex;
+}
+function getFilteredTeams() {
+  const ex = getExcludedNames();
+  const map = {};
+  for (const r of RAW.engineers) {
+    if (ex.has(r.name)) continue;
+    const key = r.team+'|'+r.week;
+    if (!map[key]) map[key] = { week:r.week, team:r.team, available_hours:0, utilized_hours:0, _hc:new Set() };
+    map[key].available_hours += r.available_hours;
+    map[key].utilized_hours  += (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
+    map[key]._hc.add(r.name);
+  }
+  return Object.values(map).map(({_hc,...rest})=>({...rest,headcount:_hc.size}));
+}
+function getFilteredEngineers() {
+  const ex = getExcludedNames();
+  return RAW.engineers.filter(e=>!ex.has(e.name)).map(e=>({
+    ...e,
+    utilized_hours: (SETTINGS.confirmed?e.utilized_hours:0)+(SETTINGS.tentative?(e.tentative_hours||0):0),
+  }));
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort();
+  ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
+  const sub = document.getElementById('util-subtitle');
+  if (sub && ALL_WEEKS.length) {
+    const fy = w => w.replace(/\d+ /,'');
+    sub.textContent = ALL_WEEKS[0]+' – '+ALL_WEEKS[ALL_WEEKS.length-1];
+  }
+  populateSelects();
+  renderUtilisation();
+  renderHeatmap();
+  renderEngineers();
+  renderScenario();
+}
+
+function populateSelects() {
+  const tOpts = ALL_TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
+  const wOpts = ALL_WEEKS.map(w=>`<option value="${w}">${w}</option>`).join('');
+  document.getElementById('team-filter').innerHTML = '<option value="ALL">All Teams</option>'+tOpts;
+  document.getElementById('heatmap-filter').innerHTML = '<option value="ALL">All Teams</option>'+tOpts;
+  document.getElementById('eng-team-filter').innerHTML = '<option value="ALL">All Teams</option>'+tOpts;
+  document.getElementById('scenario-team-select').innerHTML = tOpts;
+  const ap = document.getElementById('addperson-team');
+  if (ap) ap.innerHTML = tOpts;
+  ['week-range-from','week-range-to','eng-week-from','eng-week-to'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) { el.innerHTML = wOpts; }
+  });
+  document.getElementById('week-range-from').value = ALL_WEEKS[0];
+  document.getElementById('week-range-to').value   = ALL_WEEKS[ALL_WEEKS.length-1];
+  document.getElementById('eng-week-from').value   = ALL_WEEKS[0];
+  document.getElementById('eng-week-to').value     = ALL_WEEKS[ALL_WEEKS.length-1];
+}
+
+// ── Page navigation ───────────────────────────────────────────────────────────
+function showPage(p, el) {
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+  document.getElementById('page-'+p).classList.add('active');
+  if (el) el.classList.add('active');
+  if (p==='heatmap') renderHeatmap();
+  if (p==='engineers') renderEngineers();
+  if (p==='scenario') renderScenario();
+}
+
+// ── View mode ─────────────────────────────────────────────────────────────────
+function setViewMode(m) {
+  viewMode = m;
+  document.querySelectorAll('#view-toggle .pill').forEach((p,i)=>{
+    p.classList.toggle('active',(i===0&&m==='team')||(i===1&&m==='engineer'));
+  });
+  renderUtilisation();
+}
+
+// ── Util helpers ──────────────────────────────────────────────────────────────
+function getUtilColor(p){ if(p>95)return'#ef4444';if(p>85)return'#f97316';if(p>70)return'#f59e0b';return'#22c55e'; }
+function getBadge(p){
+  if(p>95)return`<span class="badge badge-red">Critical</span>`;
+  if(p>85)return`<span class="badge badge-orange">High</span>`;
+  if(p>70)return`<span class="badge badge-yellow">Busy</span>`;
+  if(p>0) return`<span class="badge badge-green">Healthy</span>`;
+  return`<span class="badge" style="background:rgba(107,114,128,.15);color:var(--muted)">No Data</span>`;
+}
+function utilBar(p){
+  const c=getUtilColor(p);
+  return`<div class="util-bar-wrap"><div class="util-bar"><div class="util-bar-fill" style="width:${Math.min(p,100)}%;background:${c}"></div></div><span class="util-pct" style="color:${c}">${p.toFixed(0)}%</span></div>`;
+}
+function getFilteredWeeks(fromId,toId){
+  const from=document.getElementById(fromId).value;
+  const to=document.getElementById(toId).value;
+  const fi=ALL_WEEKS.indexOf(from), ti=ALL_WEEKS.indexOf(to);
+  return ALL_WEEKS.slice(Math.min(fi,ti),Math.max(fi,ti)+1);
+}
+
+// ── Utilisation page ──────────────────────────────────────────────────────────
+function renderUtilisation(){
+  const tf=document.getElementById('team-filter').value;
+  const weeks=getFilteredWeeks('week-range-from','week-range-to');
+  if(viewMode==='team') renderTeamView(tf,weeks);
+  else renderEngineerViewOnMain(tf,weeks);
+}
+
+function aggregateTeamWeekly(teamFilter,weeks){
+  const ft=getFilteredTeams();
+  const teams=teamFilter==='ALL'?ALL_TEAMS:[teamFilter];
+  const data={};
+  for(const t of teams){ data[t]={}; for(const w of weeks) data[t][w]={avail:0,util:0}; }
+  for(const r of ft){
+    if(!weeks.includes(r.week)) continue;
+    if(teamFilter!=='ALL'&&r.team!==teamFilter) continue;
+    if(!data[r.team]) continue;
+    data[r.team][r.week].avail+=r.available_hours;
+    data[r.team][r.week].util +=r.utilized_hours;
+  }
+  return data;
+}
+
+function renderTeamView(tf,weeks){
+  document.getElementById('chart-title').textContent='Weekly Utilisation by Team';
+  document.getElementById('table-title').textContent='Team Breakdown';
+  const data=aggregateTeamWeekly(tf,weeks);
+  const teams=tf==='ALL'?ALL_TEAMS:[tf];
+  let ta=0,tu=0,maxU=0,maxT='',over=0;
+  for(const t of teams){
+    let a=0,u=0;
+    for(const w of weeks){a+=data[t][w].avail;u+=data[t][w].util;}
+    ta+=a;tu+=u;
+    const p=a>0?u/a*100:0;
+    if(p>maxU){maxU=p;maxT=t;}
+    if(p>85)over++;
+  }
+  const avg=ta>0?tu/ta*100:0;
+  document.getElementById('kpi-grid').innerHTML=`
+    <div class="kpi" style="--kpi-color:var(--accent)"><div class="kpi-label">Avg Utilisation</div><div class="kpi-value" style="color:${getUtilColor(avg)}">${avg.toFixed(0)}%</div><div class="kpi-sub">${tu.toFixed(0)} / ${ta.toFixed(0)} hrs</div></div>
+    <div class="kpi" style="--kpi-color:var(--red)"><div class="kpi-label">Highest Team</div><div class="kpi-value" style="font-size:18px;color:${getUtilColor(maxU)}">${maxT||'—'}</div><div class="kpi-sub">${maxU.toFixed(0)}% utilised</div></div>
+    <div class="kpi" style="--kpi-color:var(--orange)"><div class="kpi-label">Teams &gt;85%</div><div class="kpi-value" style="color:${over>0?'var(--orange)':'var(--green)'}">${over}</div><div class="kpi-sub">of ${teams.length} teams</div></div>
+    <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-label">Weeks Shown</div><div class="kpi-value">${weeks.length}</div><div class="kpi-sub">${weeks[0]} → ${weeks[weeks.length-1]}</div></div>`;
+  const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399','#f472b6','#60a5fa','#facc15','#c084fc','#38bdf8','#4ade80','#fbbf24','#f87171'];
+  const ds=teams.slice(0,15).map((t,i)=>({
+    label:t, data:weeks.map(w=>{ const d=data[t][w]; return d.avail>0?+(d.util/d.avail*100).toFixed(1):null; }),
+    borderColor:pal[i%pal.length],backgroundColor:pal[i%pal.length]+'22',tension:.4,pointRadius:3,borderWidth:2,spanGaps:true
+  }));
+  drawLineChart('main-chart',weeks,ds,mainChart,c=>mainChart=c);
+  tableRows=teams.map(t=>{
+    let a=0,u=0;
+    const wd=weeks.map(w=>{const d=data[t][w];a+=d.avail;u+=d.util;return d.avail>0?+(d.util/d.avail*100).toFixed(1):0;});
+    return{team:t,avg:a>0?u/a*100:0,avail:a,util:u,weekData:wd};
+  }).sort((a,b)=>b.avg-a.avg);
+  document.getElementById('table-head').innerHTML=`<tr><th>Team</th>${weeks.map(w=>`<th>${w.replace(/\d+ /,'')}</th>`).join('')}<th>Avg%</th><th>Status</th></tr>`;
+  renderTeamTableBody(weeks);
+}
+
+function renderEngineerViewOnMain(tf,weeks){
+  document.getElementById('chart-title').textContent='Engineer Utilisation';
+  document.getElementById('table-title').textContent='Engineer Breakdown';
+  const fe=getFilteredEngineers();
+  const map={};
+  for(const r of fe){
+    if(!weeks.includes(r.week))continue;
+    if(tf!=='ALL'&&r.team!==tf)continue;
+    if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
+    map[r.name].avail+=r.available_hours;
+    map[r.name].util +=r.utilized_hours;
+  }
+  const engs=Object.values(map).filter(e=>e.avail>0).sort((a,b)=>(b.util/b.avail)-(a.util/a.avail));
+  const top=engs.slice(0,20);
+  const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c'];
+  const ds=[{label:'Utilisation %',data:top.map(e=>+(e.util/e.avail*100).toFixed(1)),
+    backgroundColor:top.map(e=>getUtilColor(e.util/e.avail*100)),borderRadius:6,type:'bar'}];
+  drawLineChart('main-chart',top.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' ')),ds,mainChart,c=>mainChart=c,true);
+  document.getElementById('table-head').innerHTML='<tr><th>Engineer</th><th>Team</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>';
+  document.getElementById('table-body').innerHTML=engs.map(e=>{const p=e.avail>0?e.util/e.avail*100:0;return`<tr><td style="font-weight:600">${e.name}</td><td><span class="badge badge-blue">${e.team}</span></td><td class="mono">${e.avail.toFixed(0)}</td><td class="mono">${e.util.toFixed(0)}</td><td>${utilBar(p)}</td><td>${getBadge(p)}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No data</td></tr>';
+}
+
+function renderTeamTableBody(weeks){
+  const search=(document.getElementById('table-search').value||'').toLowerCase();
+  const f=tableRows.filter(r=>r.team.toLowerCase().includes(search));
+  document.getElementById('table-body').innerHTML=f.map(r=>`<tr><td style="font-weight:600">${r.team}</td>${r.weekData.map(p=>`<td><span class="mono" style="color:${getUtilColor(p)}">${p>0?p.toFixed(0)+'%':'—'}</span></td>`).join('')}<td>${utilBar(r.avg)}</td><td>${getBadge(r.avg)}</td></tr>`).join()||'<tr><td colspan="20" class="empty">No data</td></tr>';
+}
+function filterTable(){renderTeamTableBody(getFilteredWeeks('week-range-from','week-range-to'));}
+
+// ── Heatmap ───────────────────────────────────────────────────────────────────
+function renderHeatmap(){
+  const tf=document.getElementById('heatmap-filter').value;
+  const weeks=ALL_WEEKS;
+  const teams=tf==='ALL'?ALL_TEAMS:[tf];
+  const data=aggregateTeamWeekly(tf,weeks);
+  function hmClass(p){if(p===0)return'hm-0';if(p<40)return'hm-1';if(p<70)return'hm-2';if(p<85)return'hm-3';if(p<95)return'hm-4';return'hm-5';}
+  let h=`<table class="heatmap-table"><thead><tr><th></th>${weeks.map(w=>`<th>${w.replace(/\d+ /,'')}</th>`).join('')}</tr></thead><tbody>`;
+  for(const t of teams){
+    h+=`<tr><td class="hm-team">${t}</td>`;
+    for(const w of weeks){
+      const d=data[t][w]; const p=d.avail>0?d.util/d.avail*100:0;
+      h+=`<td class="heatmap-cell ${hmClass(p)}" title="${t} · ${w}: ${p.toFixed(1)}%">${p>0?p.toFixed(0)+'%':'—'}</td>`;
+    }
+    h+='</tr>';
+  }
+  h+='</tbody></table>';
+  document.getElementById('heatmap-container').innerHTML=h;
+}
+
+// ── Engineers page ────────────────────────────────────────────────────────────
+function renderEngineers(){
+  const tf=document.getElementById('eng-team-filter').value;
+  const weeks=getFilteredWeeks('eng-week-from','eng-week-to');
+  const fe=getFilteredEngineers();
+  const map={};
+  for(const r of fe){
+    if(!weeks.includes(r.week))continue;
+    if(tf!=='ALL'&&r.team!==tf)continue;
+    if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
+    map[r.name].avail+=r.available_hours;
+    map[r.name].util +=r.utilized_hours;
+  }
+  const engs=Object.values(map).filter(e=>e.avail>0).sort((a,b)=>(b.util/b.avail)-(a.util/a.avail));
+  const top=engs.slice(0,20);
+  const pcts=top.map(e=>+(e.util/e.avail*100).toFixed(1));
+  if(engChart)engChart.destroy();
+  const ctx=document.getElementById('eng-chart').getContext('2d');
+  engChart=new Chart(ctx,{
+    type:'bar',
+    data:{labels:top.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' ')),datasets:[{label:'Utilisation %',data:pcts,backgroundColor:pcts.map(p=>getUtilColor(p)),borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw}% utilised`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,max:100,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}
+  });
+  engTableRows=engs.map(e=>({...e,pct:e.avail>0?e.util/e.avail*100:0}));
+  document.getElementById('eng-table-head').innerHTML='<tr><th>Engineer</th><th>Team</th><th>Role</th><th>Avail Hrs</th><th>Util Hrs</th><th>Utilisation</th><th>Status</th></tr>';
+  renderEngTableBody();
+}
+function renderEngTableBody(){
+  const s=(document.getElementById('eng-search').value||'').toLowerCase();
+  const f=engTableRows.filter(r=>r.name.toLowerCase().includes(s)||r.team.toLowerCase().includes(s));
+  document.getElementById('eng-table-body').innerHTML=f.map(r=>`<tr><td style="font-weight:600">${r.name}</td><td><span class="badge badge-blue">${r.team}</span></td><td style="color:var(--muted);font-size:12px">${r.job||'—'}</td><td class="mono">${r.avail.toFixed(0)}</td><td class="mono">${r.util.toFixed(0)}</td><td>${utilBar(r.pct)}</td><td>${getBadge(r.pct)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No data</td></tr>';
+}
+function filterEngTable(){renderEngTableBody();}
+
+// ── Scenario Planner ──────────────────────────────────────────────────────────
+function setScenarioView(v){
+  scenarioViewMode=v;
+  document.querySelectorAll('#scenario-view-toggle .pill').forEach((p,i)=>{p.classList.toggle('active',(i===0&&v==='utilisation')||(i===1&&v==='gantt'));});
+  document.getElementById('gantt-view').style.display=v==='gantt'?'block':'none';
+  document.getElementById('util-view').style.display=v==='utilisation'?'block':'none';
+  if(v==='gantt')renderGantt();
+}
+
+function addPhase(){
+  phaseCounter++;
+  const id=phaseCounter;
+  const teams=ALL_TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
+  const div=document.createElement('div');
+  div.id=`phase-${id}`;
+  div.style.cssText='background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
+  div.innerHTML=`
+    <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
+      <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><div class="form-label">Duration</div><input class="form-input" id="pd-${id}" type="number" min="1" value="4"></div>
+      <div><div class="form-label">Unit</div><select class="form-input" id="pu-${id}" style="cursor:pointer"><option value="weeks">Weeks</option><option value="days">Days</option></select></div>
+      <div><div class="form-label">Start offset (wks)</div><input class="form-input" id="po-${id}" type="number" min="0" value="0" placeholder="0=project start"></div>
+    </div>
+    <div><div class="form-label">Or start same time as phase</div><select class="form-input" id="pw-${id}" style="cursor:pointer"><option value="">— none —</option></select></div>`;
+  document.getElementById('phase-list').appendChild(div);
+  refreshWithOptions();
+}
+function removePhase(id){ document.getElementById(`phase-${id}`)?.remove(); refreshWithOptions(); }
+function refreshWithOptions(){
+  const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
+  phases.forEach(phaseEl=>{
+    const id=phaseEl.id.replace('phase-','');
+    const sel=document.getElementById(`pw-${id}`);
+    if(!sel)return;
+    const others=phases.filter(p=>p.id!==`phase-${id}`);
+    sel.innerHTML='<option value="">— none —</option>'+others.map(p=>{const pid=p.id.replace('phase-','');const t=document.getElementById(`pt-${pid}`)?.value||`Phase ${pid}`;return`<option value="${pid}">Phase ${pid} (${t})</option>`;}).join('');
+  });
+}
+function addProject(){
+  const name=document.getElementById('proj-name').value.trim();
+  const startDate=document.getElementById('proj-start-date').value;
+  if(!name||!startDate){alert('Enter project name and start date');return;}
+  const phaseEls=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
+  if(!phaseEls.length){alert('Add at least one team phase');return;}
+  const projectStartMs=new Date(startDate).getTime();
+  const pStarts={};
+  phaseEls.forEach(el=>{
+    const id=el.id.replace('phase-','');
+    const withId=document.getElementById(`pw-${id}`)?.value;
+    const offset=parseFloat(document.getElementById(`po-${id}`)?.value||0);
+    pStarts[id]=withId?{waitFor:withId}:{ms:projectStartMs+offset*7*24*3600*1000};
+  });
+  Object.entries(pStarts).forEach(([id,p])=>{if(p.waitFor)pStarts[id].ms=pStarts[p.waitFor]?.ms||projectStartMs;});
+  const phases=[];
+  phaseEls.forEach(el=>{
+    const id=el.id.replace('phase-','');
+    const team=document.getElementById(`pt-${id}`)?.value;
+    const hours=parseFloat(document.getElementById(`ph-${id}`)?.value||0);
+    const dur=parseFloat(document.getElementById(`pd-${id}`)?.value||1);
+    const unit=document.getElementById(`pu-${id}`)?.value||'weeks';
+    const durWeeks=unit==='days'?dur/5:dur;
+    const weeksSpan=[];
+    let cur=new Date(pStarts[id].ms);
+    for(let i=0;i<Math.ceil(durWeeks);i++){weeksSpan.push(toWeekLabel(cur));cur.setDate(cur.getDate()+7);}
+    phases.push({id,team,hours,weeksSpan,startMs:pStarts[id].ms,durWeeks});
+  });
+  forecastProjects.push({id:Date.now(),name,startDate,phases});
+  document.getElementById('proj-name').value='';
+  document.getElementById('phase-list').innerHTML='';
+  phaseCounter=0;
+  renderProjectList();
+  renderScenario();
+}
+function removeProject(id){forecastProjects=forecastProjects.filter(p=>p.id!==id);renderProjectList();renderScenario();}
+function clearProjects(){forecastProjects=[];renderProjectList();renderScenario();}
+function renderProjectList(){
+  const el=document.getElementById('project-list');
+  const cw=document.getElementById('clear-btn-wrap');
+  if(!forecastProjects.length){el.innerHTML='<div class="empty" style="padding:24px">No projects yet.</div>';if(cw)cw.style.display='none';return;}
+  if(cw)cw.style.display='block';
+  el.innerHTML=forecastProjects.map(p=>`<div class="project-chip"><div><div class="project-chip-name">${p.name}</div><div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s)</div></div><button class="chip-remove" onclick="removeProject(${p.id})">×</button></div>`).join('');
+}
+function applyAddPerson(){
+  const team=document.getElementById('addperson-team').value;
+  const count=parseInt(document.getElementById('addperson-count').value||1);
+  const hours=parseFloat(document.getElementById('addperson-hours').value||40);
+  addPersonForecast={team,count,hoursPerWeek:hours};
+  document.getElementById('addperson-status').textContent=`+${count} person(s) to ${team} (+${count*hours}h/wk available)`;
+  renderScenario();
+}
+function clearAddPerson(){addPersonForecast=null;document.getElementById('addperson-status').textContent='';renderScenario();}
+
+function renderGantt(){
+  const c=document.getElementById('gantt-container');
+  if(!forecastProjects.length){c.innerHTML='<div class="empty">Add a project first.</div>';return;}
+  const aw=new Set();
+  forecastProjects.forEach(p=>p.phases.forEach(ph=>ph.weeksSpan.forEach(w=>aw.add(w))));
+  const gw=[...aw].sort();
+  const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399'];
+  let h=`<table style="border-collapse:separate;border-spacing:2px;min-width:100%"><thead><tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);background:transparent;white-space:nowrap">Phase</th>`;
+  gw.forEach(w=>{h+=`<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:34px">${w.replace(/\d+ /,'')}</th>`;});
+  h+='</tr></thead><tbody>';
+  forecastProjects.forEach((proj,pi)=>{
+    h+=`<tr><td colspan="${gw.length+1}" style="padding:8px 10px 4px;font-size:12px;font-weight:700">${proj.name}</td></tr>`;
+    proj.phases.forEach((ph,phi)=>{
+      const col=pal[(pi*3+phi)%pal.length];
+      h+=`<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${ph.team}</td>`;
+      gw.forEach(w=>{
+        const a=ph.weeksSpan.includes(w);
+        h+=`<td style="height:26px;border-radius:4px;background:${a?col+'44':'transparent'};border:1px solid ${a?col:'transparent'};text-align:center">${a?`<span style="font-size:9px;color:${col}">${ph.hours}h</span>`:''}</td>`;
+      });
+      h+='</tr>';
+    });
+  });
+  c.innerHTML=h+'</tbody></table>';
+}
+
+function renderScenario(){
+  const ft=getFilteredTeams();
+  const weeks=ALL_WEEKS;
+  const baseline={};
+  for(const t of ALL_TEAMS){baseline[t]={};for(const w of weeks)baseline[t][w]={avail:0,util:0};}
+  for(const r of ft){if(baseline[r.team]?.[r.week]!==undefined){baseline[r.team][r.week].avail+=r.available_hours;baseline[r.team][r.week].util+=r.utilized_hours;}}
+  if(addPersonForecast){const{team,count,hoursPerWeek}=addPersonForecast;for(const w of weeks)if(baseline[team]?.[w])baseline[team][w].avail+=count*hoursPerWeek;}
+  const fl={};
+  for(const proj of forecastProjects)for(const ph of proj.phases){if(!fl[ph.team])fl[ph.team]={};for(const w of ph.weeksSpan)fl[ph.team][w]=(fl[ph.team][w]||0)+ph.hours;}
+  if(scenarioViewMode==='gantt'){renderGantt();}
+  const st=document.getElementById('scenario-team-select').value||ALL_TEAMS[0];
+  const bp=weeks.map(w=>{const d=baseline[st]?.[w];return d&&d.avail>0?+(d.util/d.avail*100).toFixed(1):null;});
+  const fp=weeks.map(w=>{const d=baseline[st]?.[w];if(!d||d.avail===0)return null;const x=fl[st]?.[w]||0;return+((d.util+x)/d.avail*100).toFixed(1);});
+  if(scenarioChart)scenarioChart.destroy();
+  const ctx=document.getElementById('scenario-chart').getContext('2d');
+  scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>w.replace(/\d+ /,'')),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}});
+  const bn=[];
+  for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;if(x===0&&!addPersonForecast)continue;const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>85)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
+  let ah='';const crit={},warn={};
+  for(const b of bn){if(b.projPct>95)(crit[b.team]=crit[b.team]||[]).push(b);else(warn[b.team]=warn[b.team]||[]).push(b);}
+  for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} wk(s): ${bs.map(b=>b.week.replace(/\d+ /,'')).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
+  for(const[t,bs]of Object.entries(warn))ah+=`<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} wk(s): ${bs.map(b=>b.week.replace(/\d+ /,'')).join(', ')}.</div></div></div>`;
+  document.getElementById('alert-container').innerHTML=bn.length?`<div class="alert-list">${ah}</div>`:(forecastProjects.length||addPersonForecast?'<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div></div></div></div>':'');
+  const tbody=document.getElementById('bottleneck-body');
+  if(!bn.length){tbody.innerHTML=`<tr><td colspan="6" class="empty">${forecastProjects.length||addPersonForecast?'No weeks exceed 85%.':'Add a project to see analysis.'}</td></tr>`;return;}
+  tbody.innerHTML=bn.sort((a,b)=>b.projPct-a.projPct).map(b=>`<tr><td style="font-weight:600">${b.team}</td><td class="mono">${b.week.replace(/\d+ /,'')}</td><td>${utilBar(b.basePct)}</td><td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td><td>${utilBar(b.projPct)}</td><td>${getBadge(b.projPct)}</td></tr>`).join('');
+}
+
+// ── Chart helper ──────────────────────────────────────────────────────────────
+function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
+  if(existing)existing.destroy();
+  const ctx=document.getElementById(canvasId).getContext('2d');
+  setter(new Chart(ctx,{
+    type:isBar?'bar':'line',
+    data:{labels:isBar?labels:labels.map(w=>w.replace(/\d+ /,'')),datasets},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne',size:11},boxWidth:12}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+(isBar?'%':'%'):'—'}`}}},
+      scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,max:isBar?100:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}
+  }));
+}
+
+// ── Week label helper (used by scenario planner) ──────────────────────────────
+function toWeekLabel(date){
+  const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));
+  const dn=d.getUTCDay()||7;
+  d.setUTCDate(d.getUTCDate()+4-dn);
+  const ys=new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return`${d.getUTCFullYear()} W${Math.ceil((((d-ys)/86400000)+1)/7)}`;
+}
+
+// ── AI panel ──────────────────────────────────────────────────────────────────
+let aiHistory=[];
+function setPrompt(t){document.getElementById('ai-input').value=t;document.getElementById('ai-input').focus();}
+function appendAiMessage(role,content,loading=false){
+  const c=document.getElementById('ai-messages');
+  const div=document.createElement('div');
+  div.className=`ai-msg ai-msg-${role}`;
+  if(loading)div.id='ai-loading-msg';
+  div.innerHTML=`<div class="ai-msg-bubble">${loading?'<span class="ai-typing">●●●</span>':content.replace(/
+/g,'<br>')}</div>`;
+  c.appendChild(div);c.scrollTop=c.scrollHeight;return div;
+}
+function removeLoadingMsg(){document.getElementById('ai-loading-msg')?.remove();}
+async function sendAiMessage(){
+  const inp=document.getElementById('ai-input');
+  const text=inp.value.trim();if(!text)return;
+  inp.value='';
+  appendAiMessage('user',text);
+  aiHistory.push({role:'user',content:text});
+  appendAiMessage('assistant','',true);
+  try{
+    const ts=ALL_TEAMS.map(t=>{const r=RAW.teams.filter(x=>x.team===t);const a=r.reduce((s,x)=>s+x.available_hours,0);const u=r.reduce((s,x)=>s+x.utilized_hours,0);return`${t}:${a>0?(u/a*100).toFixed(0):0}%`;}).join(';');
+    const fd=JSON.stringify(RAW.teams.map(r=>({w:r.week.replace(/\d+ /,''),t:r.team,a:Math.round(r.available_hours),u:Math.round(r.utilized_hours)})));
+    const sys=`You are a resource planning expert. Period: ${ALL_WEEKS[0]} to ${ALL_WEEKS[ALL_WEEKS.length-1]} (${ALL_WEEKS.length} weeks), ${ALL_TEAMS.length} teams. Utilisation: ${ts}. Full data: ${fd}. Answer concisely using week numbers (W14, W15...).`;
+    const resp=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system:sys,messages:aiHistory})});
+    const data=await resp.json();
+    removeLoadingMsg();
+    if(!resp.ok||data.error){appendAiMessage('assistant',`⚠️ ${data.error||'Error'}`);aiHistory.pop();return;}
+    const reply=data.content?.[0]?.text||'No response';
+    aiHistory.push({role:'assistant',content:reply});
+    appendAiMessage('assistant',reply);
+    if(aiHistory.length>20)aiHistory=aiHistory.slice(-20);
+  }catch(err){removeLoadingMsg();appendAiMessage('assistant',`⚠️ ${err.message}`);}
+}
+
+// ── Status + live clock ───────────────────────────────────────────────────────
+let _clock=null;
+function setStatus(state,text){
+  const dot=document.getElementById('status-dot');
+  const span=document.getElementById('status-text');
+  if(!dot||!span)return;
+  const cols={loading:'#f59e0b',ok:'#22c55e',error:'#ef4444'};
+  dot.style.background=cols[state]||'#6b7280';
+  if(state==='ok'){
+    if(_clock)clearInterval(_clock);
+    function tick(){const n=new Date();if(span)span.textContent='Live · '+[n.getHours(),n.getMinutes(),n.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');}
+    tick();_clock=setInterval(tick,1000);
+  }else{
+    if(_clock){clearInterval(_clock);_clock=null;}
+    span.textContent=text;
+  }
+}
+
+// ── Live data loading ─────────────────────────────────────────────────────────
+async function loadLiveData(){
+  setStatus('loading','Fetching from Resource Guru...');
+  try{
+    const res=await fetch('/api/utilisation');
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    // Only re-render if data has changed
+    const newSig=data.meta?.fetched_at;
+    if(newSig&&newSig===RAW.meta?.fetched_at){setStatus('ok','');setTimeout(loadLiveData,300000);return;}
+    const savedTeam=document.getElementById('team-filter')?.value;
+    RAW=data;window.RAW=RAW;
+    setStatus('ok','');
+    const info=document.getElementById('ai-data-info');
+    if(info){
+      const engs=[...new Set(RAW.engineers.map(e=>e.name))].length;
+      const wks=[...new Set(RAW.teams.map(r=>r.week))].sort();
+      info.textContent=`${engs} engineers · ${[...new Set(RAW.teams.map(r=>r.team))].length} teams · ${wks.length} weeks`;
+    }
+    init();
+    if(savedTeam&&savedTeam!=='ALL'){document.getElementById('team-filter').value=savedTeam;renderUtilisation();}
+    const wl=[...new Set((data.teams||[]).map(r=>r.week))].length;
+    setTimeout(loadLiveData,wl<10?45000:300000);
+  }catch(err){
+    setStatus('error','Failed to load live data');
+    const kg=document.getElementById('kpi-grid');
+    if(kg)kg.innerHTML=`<div class="chart-card" style="grid-column:1/-1;text-align:center;padding:40px;color:var(--muted)"><div style="font-size:20px;margin-bottom:12px">⚠️</div><div style="font-weight:700;margin-bottom:8px">Could not connect to proxy server</div><div style="font-size:12px;margin-top:8px;color:#4f8ef7;cursor:pointer" onclick="loadLiveData()">↻ Retry</div></div>`;
+    setTimeout(loadLiveData,30000);
+  }
+}
+
+loadLiveData();
+</script>
 </body>
 </html>
