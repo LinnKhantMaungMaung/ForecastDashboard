@@ -64,7 +64,25 @@ app.get('/api/utilisation', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+const BASE = 'https://api.resourceguruapp.com/v1';
+app.get('/api/debug-raw', async (req, res) => {
+  try {
+    const { fetchReportRange } = require('./resourceGuru');
+    const from = `${new Date().getFullYear()}-04-06`;
+    const to   = `${new Date().getFullYear()}-04-12`;
+    const report = await fetchReportRange(from, to);
+    const resources = Array.isArray(report) ? report : (report.resources || report.data || []);
+    res.json({
+      fetchedAt: new Date().toISOString(),
+      fetchedFrom: `${BASE}/${process.env.RG_ACCOUNT}/reports/resources`,
+      dateRange: { from, to },
+      resourceCount: resources.length,
+      rawData: resources,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get('/api/debug-week', async (req, res) => {
   try {
     const from = req.query.from || `${new Date().getFullYear()}-04-06`;
