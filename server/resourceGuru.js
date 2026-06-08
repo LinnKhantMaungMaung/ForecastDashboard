@@ -67,7 +67,7 @@ async function rgGet(path, params = {}) {
 // All active resources — includes name, job_title, resource_type, groups
 async function fetchResources() {
   console.log('[RG] Fetching resources...');
-  return rgGet('/resources');
+  return rgGet('/resources', { fields: 'custom_field_values' });
 }
 
 // All resource types — tells us which IDs are Contractor, Equipment etc
