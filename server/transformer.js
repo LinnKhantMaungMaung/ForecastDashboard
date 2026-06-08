@@ -107,7 +107,7 @@ async function buildRawData(from, to) {
       resources.forEach(r => {
         // RG returns groups as an array: [{ id, name, ... }]
         // First group = primary department/team
-        const groupName = (r.groups && r.groups.length > 0) ? r.groups[0].name : null;
+        const groupName = null;
 
         const rtName = r.resource_type?.name
           || typeMap[r.resource_type?.id]
