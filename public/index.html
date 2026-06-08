@@ -922,8 +922,7 @@ function appendAiMessage(role,content,loading=false){
   const div=document.createElement('div');
   div.className=`ai-msg ai-msg-${role}`;
   if(loading)div.id='ai-loading-msg';
-  div.innerHTML=`<div class="ai-msg-bubble">${loading?'<span class="ai-typing">●●●</span>':content.replace(/
-/g,'<br>')}</div>`;
+  div.innerHTML=`<div class="ai-msg-bubble">${loading?'<span class="ai-typing">●●●</span>':content.split('\n').join('<br>')}</div>`;
   c.appendChild(div);c.scrollTop=c.scrollHeight;return div;
 }
 function removeLoadingMsg(){document.getElementById('ai-loading-msg')?.remove();}
