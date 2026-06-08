@@ -1,7 +1,23 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchBookingsForRange, sleep } = require('./resourceGuru');
+// ─────────────────────────────────────────────────────────────────────────────
+// Converts Resource Guru API responses into the RAW shape the dashboard needs:
+//
+//   RAW = {
+//     teams:         [{ week, team, available_hours, utilized_hours, tentative_hours, headcount }],
+//     engineers:     [{ week, name, team, job_title, available_hours, utilized_hours, tentative_hours, isContractor, seniority }],
+//     engineer_list: [{ name, team, job_title, isContractor, resourceType, seniority, group }],
+//     resource_types: [...unique type names],
+//     meta:          { fetched_at, weeks }
+//   }
+//
+// Team assignment priority:
+//   1. RG Groups field (direct department data from RG)  ← most accurate
+//   2. Job title regex mapping                           ← fallback
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── ISO week label ────────────────────────────────────────────────────────────
+const { fetchReportRange, fetchResources, fetchResourceTypes, sleep } = require('./resourceGuru');
+
+// ── ISO week label "YYYY Www" ─────────────────────────────────────────────────
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -19,6 +35,7 @@ function weekMonday(date) {
   return d;
 }
 
+// Build array of { label, from, to } for each ISO week between two dates
 function buildWeeks(from, to) {
   const weeks = [];
   let cur = weekMonday(new Date(from));
@@ -29,24 +46,20 @@ function buildWeeks(from, to) {
     sunday.setDate(sunday.getDate() + 6);
     weeks.push({
       label: toWeekLabel(monday),
-      from: monday.toISOString().slice(0, 10),
-      to: sunday.toISOString().slice(0, 10),
+      from:  monday.toISOString().slice(0, 10),
+      to:    sunday.toISOString().slice(0, 10),
     });
     cur.setDate(cur.getDate() + 7);
   }
   return weeks;
 }
 
-// ── Team mapping from job title ───────────────────────────────────────────────
-function getTeam(resource) {
-  const jt = resource.job_title || '';
-  // Department-based team names (from RG custom fields or type names if available)
-  const dept = resource._dept || '';
-  if (dept) return dept;
-
-  if (/Installation Electrician|Electrical Labourer|QA Co-ordinator/i.test(jt)) return 'Electrical Installation';
-  if (/Controls Engineer|Head of Controls|Controls Manager|Controls Site/i.test(jt)) return 'PLC';
+// ── Team from job title (fallback when RG groups not available) ───────────────
+function getTeamFromJobTitle(jt) {
+  if (!jt) return 'Unassigned';
+  if (/Installation Electrician|Electrical Labourer|QA Co-ordinator|\[SL\]Engineering Manager/i.test(jt)) return 'Electrical Installation';
   if (/PLC.?Amazon|Amazon/i.test(jt)) return 'PLC Amazon';
+  if (/Controls Engineer|Head of Controls|Controls Manager|Controls Site/i.test(jt)) return 'PLC';
   if (/Project Engineer|Project Manager|Head of Automation|Head of Service|Automation Project|Senior Project/i.test(jt)) return 'Projects';
   if (/Service Engineer|Service Manager|Senior Service/i.test(jt)) return 'Service';
   if (/Design Engineer|Lead Design|Junior Design/i.test(jt)) return 'Design';
@@ -55,57 +68,74 @@ function getTeam(resource) {
   if (/Workshop|Apprentice/i.test(jt)) return 'Control Panels - Notts';
   if (/Director|Managing Director|Executive Director|Technical Director|Integration Director|Operations Director/i.test(jt)) return 'Director';
   if (/Accounts|Business Support|Supply Chain|Logistics/i.test(jt)) return 'Office';
-  if (/Engineering Manager|\[SL\]/i.test(jt)) return 'Electrical Installation';
-  if (/R&D|R&amp;D/i.test(jt)) return 'R&D Engineer';
+  if (/R&D/i.test(jt)) return 'R&D Engineer';
   if (/Control Systems Business Development/i.test(jt)) return 'Control Systems Business Development Architect';
-  return jt || 'Unassigned';
+  return jt;
 }
 
-// ── Classify seniority level ──────────────────────────────────────────────────
+// ── Seniority from job title ──────────────────────────────────────────────────
 function getSeniority(job_title) {
-  const jt = (job_title || '').toLowerCase();
-  if (/director|managing director|executive director|chief|ceo|cto|coo/i.test(jt)) return 'director';
-  if (/manager|head of|senior manager/i.test(jt)) return 'manager';
+  const jt = job_title || '';
+  if (/director|managing director|executive director|chief/i.test(jt)) return 'director';
+  if (/manager|head of/i.test(jt)) return 'manager';
   return 'staff';
 }
 
-// ── Main build function ───────────────────────────────────────────────────────
+// ── Main builder ──────────────────────────────────────────────────────────────
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
-  console.log(`[Transform] Fetching ${weeks.length} weekly reports (${from} → ${to})...`);
+  console.log(`[Transform] Building data for ${weeks.length} weeks (${from} → ${to})`);
 
-  // Fetch resource metadata (includes resource_type for contractor detection)
-  let resourceMeta = {};
-  let resourceTypeMap = {}; // id → name
+  // ── Step 1: Fetch resource metadata (groups, resource_type, job_title) ──────
+  // This is the call that gives us real department/group data from RG.
+  // Endpoint: GET /v1/{account}/resources
+  let resourceMeta = {};   // name → { group, isContractor, isEquipment, seniority, resourceTypeName }
   try {
     const [resources, resourceTypes] = await Promise.all([
-      fetchResources(),
-      fetchResourceTypes(),
+      fetchResources(),     // GET /v1/{account}/resources
+      fetchResourceTypes(), // GET /v1/{account}/resource_types
     ]);
-    // Build resource type map
+
+    // Build type id → name map
+    const typeMap = {};
     if (Array.isArray(resourceTypes)) {
-      resourceTypes.forEach(rt => { resourceTypeMap[rt.id] = rt.name; });
+      resourceTypes.forEach(rt => { typeMap[rt.id] = rt.name; });
+      console.log(`[Transform] Resource types from RG: ${resourceTypes.map(rt => rt.name).join(', ')}`);
     }
-    // Build resource metadata lookup by name
+
     if (Array.isArray(resources)) {
       resources.forEach(r => {
-        const rtName = r.resource_type?.name || resourceTypeMap[r.resource_type?.id] || 'Person';
+        // RG returns groups as an array: [{ id, name, ... }]
+        // First group = primary department/team
+        const groupName = (r.groups && r.groups.length > 0) ? r.groups[0].name : null;
+
+        const rtName = r.resource_type?.name
+          || typeMap[r.resource_type?.id]
+          || 'Person';
+
         resourceMeta[r.name] = {
+          group:            groupName,          // real RG department — null if not configured
           resourceTypeName: rtName,
-          isContractor: /contractor/i.test(rtName),
-          isEquipment: /equipment|machine|room/i.test(rtName),
-          job_title: r.job_title || '',
-          seniority: getSeniority(r.job_title),
+          isContractor:     /contractor/i.test(rtName),
+          isEquipment:      /equipment|machine|room|vehicle/i.test(rtName),
+          seniority:        getSeniority(r.job_title),
+          job_title:        r.job_title || '',
         };
       });
+
+      // Log how many resources have groups vs not
+      const withGroup    = Object.values(resourceMeta).filter(m => m.group).length;
+      const withoutGroup = Object.values(resourceMeta).filter(m => !m.group).length;
+      console.log(`[Transform] Resources with RG group: ${withGroup}, without (using job title): ${withoutGroup}`);
     }
-    console.log(`[Transform] Loaded metadata for ${Object.keys(resourceMeta).length} resources`);
-    console.log(`[Transform] Resource types found: ${[...new Set(Object.values(resourceMeta).map(r => r.resourceTypeName))].join(', ')}`);
   } catch (err) {
     console.warn('[Transform] Could not fetch resource metadata:', err.message);
   }
 
-  const teamsMap = {};
+  // ── Step 2: Fetch weekly utilisation reports ──────────────────────────────
+  // Endpoint: GET /v1/{account}/reports/resources?start_date=X&end_date=Y
+  // Called once per week — gives booked/availability/waiting_list per resource.
+  const teamsMap     = {};
   const engineersMap = {};
   const engineerList = {};
 
@@ -124,41 +154,50 @@ async function buildRawData(from, to) {
       : (report.resources || report.data || []);
 
     for (const r of resources) {
-      const name = r.name;
+      const name      = r.name;
       const job_title = r.job_title || '';
-      const meta = resourceMeta[name] || { resourceTypeName: 'Person', isContractor: false, isEquipment: false, seniority: getSeniority(job_title) };
+      const meta      = resourceMeta[name] || {
+        group: null, isContractor: false, isEquipment: false,
+        seniority: getSeniority(job_title), resourceTypeName: 'Person',
+      };
 
-      // Skip equipment/rooms
+      // Skip non-people (equipment, rooms etc)
       if (meta.isEquipment) continue;
 
-      const team = getTeam({ job_title, _dept: r._dept });
-      const avail = +(( r.availability || 0) / 60).toFixed(2);
-      const util  = +((r.booked || 0) / 60).toFixed(2);
-      const tentative = +((r.waiting_list || 0) / 60).toFixed(2); // waiting_list = tentative in RG
+      // Team: use RG group if available, otherwise fall back to job title mapping
+      const team = meta.group || getTeamFromJobTitle(job_title);
 
+      // RG reports values are in MINUTES — convert to hours
+      const avail     = +((r.availability  || 0) / 60).toFixed(2);
+      const util      = +((r.booked        || 0) / 60).toFixed(2);
+      const tentative = +((r.waiting_list  || 0) / 60).toFixed(2);
+
+      // Engineer list (unique per person, last-write wins for team assignment)
       engineerList[name] = {
         name, team, job_title,
-        isContractor: meta.isContractor,
-        resourceType: meta.resourceTypeName,
-        seniority: meta.seniority,
+        isContractor:  meta.isContractor,
+        resourceType:  meta.resourceTypeName,
+        seniority:     meta.seniority,
+        group:         meta.group,   // null = team came from job title mapping
       };
 
-      const engKey = `${name}|${wk.label}`;
-      engineersMap[engKey] = {
+      // Engineer weekly row
+      engineersMap[`${name}|${wk.label}`] = {
         week: wk.label, name, team, job_title,
         available_hours: avail,
-        utilized_hours: util,
+        utilized_hours:  util,
         tentative_hours: tentative,
-        isContractor: meta.isContractor,
-        seniority: meta.seniority,
+        isContractor:    meta.isContractor,
+        seniority:       meta.seniority,
       };
 
+      // Team weekly aggregate
       const teamKey = `${team}|${wk.label}`;
       if (!teamsMap[teamKey]) {
         teamsMap[teamKey] = {
           week: wk.label, team,
           available_hours: 0, utilized_hours: 0, tentative_hours: 0,
-          headcount: 0, _hc: new Set(),
+          _hc: new Set(),
         };
       }
       teamsMap[teamKey].available_hours += avail;
@@ -167,10 +206,12 @@ async function buildRawData(from, to) {
       if (avail > 0 || util > 0) teamsMap[teamKey]._hc.add(name);
     }
 
+    // Pace requests to stay under the 200/min rate limit
     await sleep(150);
     if ((i + 1) % 5 === 0) console.log(`[Transform] ${i + 1}/${weeks.length} weeks done`);
   }
 
+  // Finalise teams (convert Set to count)
   const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({
     ...rest,
     available_hours: +rest.available_hours.toFixed(2),
@@ -179,15 +220,15 @@ async function buildRawData(from, to) {
     headcount: _hc.size,
   }));
 
-  console.log(`[Transform] Done: ${teams.length} team-week rows, ${Object.keys(engineersMap).length} engineer-week rows`);
+  console.log(`[Transform] Done — ${teams.length} team-week rows, ${Object.keys(engineersMap).length} engineer-week rows`);
 
   return {
-    teams:         teams.sort((a, b) => a.week.localeCompare(b.week) || a.team.localeCompare(b.team)),
-    engineers:     Object.values(engineersMap).sort((a, b) => a.week.localeCompare(b.week) || a.name.localeCompare(b.name)),
-    engineer_list: Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name)),
+    teams:          teams.sort((a, b) => a.week.localeCompare(b.week) || a.team.localeCompare(b.team)),
+    engineers:      Object.values(engineersMap).sort((a, b) => a.week.localeCompare(b.week) || a.name.localeCompare(b.name)),
+    engineer_list:  Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name)),
     resource_types: [...new Set(Object.values(engineerList).map(e => e.resourceType))].sort(),
     meta: { fetched_at: new Date().toISOString(), weeks: weeks.length },
   };
 }
 
-module.exports = { buildRawData, toWeekLabel, buildWeeks, getTeam, getSeniority };
+module.exports = { buildRawData, toWeekLabel, buildWeeks, getTeamFromJobTitle, getSeniority };

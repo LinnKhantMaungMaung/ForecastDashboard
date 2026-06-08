@@ -1,29 +1,37 @@
 // server/resourceGuru.js
+// ─────────────────────────────────────────────────────────────────────────────
+// Resource Guru API client
+// Handles OAuth password-grant auth, token refresh, rate limiting,
+// and all data fetching the proxy needs.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const fetch = require('node-fetch');
-const BASE = 'https://api.resourceguruapp.com/v1';
+
+const BASE      = 'https://api.resourceguruapp.com/v1';
 const TOKEN_URL = 'https://api.resourceguruapp.com/oauth/token';
 
-let _accessToken = null;
-let _refreshToken = null;
+let _accessToken   = null;
+let _refreshToken  = null;
 let _tokenExpiresAt = 0;
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
 async function authenticate() {
   console.log('[RG] Authenticating...');
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      grant_type: 'password',
-      username: process.env.RG_USERNAME,
-      password: process.env.RG_PASSWORD,
-      client_id: process.env.RG_CLIENT_ID,
+      grant_type:    'password',
+      username:      process.env.RG_USERNAME,
+      password:      process.env.RG_PASSWORD,
+      client_id:     process.env.RG_CLIENT_ID,
       client_secret: process.env.RG_CLIENT_SECRET,
     }),
   });
   if (!res.ok) throw new Error(`RG auth failed ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  _accessToken = data.access_token;
-  _refreshToken = data.refresh_token;
+  _accessToken    = data.access_token;
+  _refreshToken   = data.refresh_token;
   _tokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000;
   console.log('[RG] Authenticated.');
 }
@@ -34,7 +42,7 @@ async function ensureToken() {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Generic GET — returns parsed JSON
+// ── Generic authenticated GET ─────────────────────────────────────────────────
 async function rgGet(path, params = {}) {
   await ensureToken();
   const url = new URL(`${BASE}/${process.env.RG_ACCOUNT}${path}`);
@@ -45,7 +53,7 @@ async function rgGet(path, params = {}) {
     });
     if (res.status === 429) {
       const retry = parseInt(res.headers.get('Retry-After') || '5', 10);
-      console.warn(`[RG] Rate limited — waiting ${retry}s`);
+      console.warn(`[RG] Rate limited on ${path} — waiting ${retry}s`);
       await sleep(retry * 1000);
       continue;
     }
@@ -54,31 +62,35 @@ async function rgGet(path, params = {}) {
   }
 }
 
-// Fetch all active resources including resource_type details
+// ── Specific fetchers ─────────────────────────────────────────────────────────
+
+// All active resources — includes name, job_title, resource_type, groups
 async function fetchResources() {
   console.log('[RG] Fetching resources...');
   return rgGet('/resources');
 }
 
-// Fetch all resource types (tells us which are Person, Contractor, Equipment etc)
+// All resource types — tells us which IDs are Contractor, Equipment etc
 async function fetchResourceTypes() {
   console.log('[RG] Fetching resource types...');
   return rgGet('/resource_types');
 }
 
-// Fetch the v2 report for a single date range
+// v2 utilisation report for a single week range
+// Returns array of resources with booked/availability totals for that period
 async function fetchReportRange(from, to) {
   await ensureToken();
   const url = new URL(`${BASE}/${process.env.RG_ACCOUNT}/reports/resources`);
   url.searchParams.set('start_date', from);
-  url.searchParams.set('end_date', to);
+  url.searchParams.set('end_date',   to);
+  console.log(`[RG] Fetching report: ${from} → ${to}  (${url})`);
   while (true) {
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${_accessToken}` },
     });
     if (res.status === 429) {
       const retry = parseInt(res.headers.get('Retry-After') || '5', 10);
-      console.warn(`[RG] Rate limited — waiting ${retry}s`);
+      console.warn(`[RG] Rate limited on report — waiting ${retry}s`);
       await sleep(retry * 1000);
       continue;
     }
@@ -87,10 +99,15 @@ async function fetchReportRange(from, to) {
   }
 }
 
-// Fetch bookings for a date range — used for tentative flag detection
-// Uses a small page size to avoid rate limit hammering
+// Alias kept for backward compat
+async function fetchReport(from, to) {
+  return fetchReportRange(from, to);
+}
+
+// Bookings for a date range (paginated, gentle rate)
+// Used for any per-booking analysis — note: can be slow for large accounts
 async function fetchBookingsForRange(from, to) {
-  console.log(`[RG] Fetching bookings for tentative data ${from} → ${to}...`);
+  console.log(`[RG] Fetching bookings ${from} → ${to}...`);
   const results = [];
   let page = 1;
   while (true) {
@@ -101,16 +118,18 @@ async function fetchBookingsForRange(from, to) {
     results.push(...data);
     if (data.length < 100) break;
     page++;
-    await sleep(300); // stay well under rate limit
+    await sleep(300);
   }
   return results;
 }
 
-async function fetchReport(from, to) {
-  return fetchReportRange(from, to);
-}
-
 module.exports = {
-  authenticate, fetchResources, fetchResourceTypes,
-  fetchReport, fetchReportRange, fetchBookingsForRange, sleep,
+  authenticate,
+  fetchResources,
+  fetchResourceTypes,
+  fetchReport,
+  fetchReportRange,
+  fetchBookingsForRange,
+  sleep,
+  BASE,
 };
