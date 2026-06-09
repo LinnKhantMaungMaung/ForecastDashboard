@@ -160,7 +160,7 @@ async function buildRawData(from, to) {
       // ── Seniority ───────────────────────────────────────────────────────
       // Use pre-fetched job_title from /resources if report job_title is empty
       const resolvedJobTitle = job_title || resourceMeta[name]?.job_title || '';
-      const seniority = resourceMeta[name]?.seniority || getSeniority(resolvedJobTitle);
+      const seniority = getSeniority(resolvedJobTitle);
 
       // ── Hours (RG reports in MINUTES) ───────────────────────────────────
       const totalAvail     = +((r.availability || 0) / 60).toFixed(2);
