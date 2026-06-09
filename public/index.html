@@ -1063,7 +1063,7 @@ async function loadLiveData(){
       info.textContent=`${engs} engineers · ${[...new Set(RAW.teams.map(r=>r.team))].length} teams · ${wks.length} weeks`;
     }
     init();
-    restoreState();
+    setTimeout(restoreState, 50);
     if(savedTeam&&savedTeam!=='ALL'){document.getElementById('team-filter').value=savedTeam;renderUtilisation();}
     const wl=[...new Set((data.teams||[]).map(r=>r.week))].length;
     setTimeout(loadLiveData,wl<10?45000:300000);
