@@ -491,7 +491,6 @@ function applySettings() {
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
   renderScenario();
-  saveState();
 }
 
 // ── Filtered data helpers ─────────────────────────────────────────────────────
@@ -616,7 +615,6 @@ function renderUtilisation(){
   const weeks=getFilteredWeeks('week-range-from','week-range-to');
   if(viewMode==='team') renderTeamView(tf,weeks);
   else renderEngineerViewOnMain(tf,weeks);
-  saveState();
 }
 
 function aggregateTeamWeekly(teamFilter,weeks){
@@ -676,10 +674,7 @@ function renderEngineerViewOnMain(tf,weeks){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'){
-      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
-      if(!depts.includes(tf)) continue;
-    }
+    if(tf!=='ALL'&&r.team!==tf)continue;
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
@@ -729,10 +724,7 @@ function renderEngineers(){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'){
-      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
-      if(!depts.includes(tf)) continue;
-    }
+    if(tf!=='ALL'&&r.team!==tf)continue;
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
@@ -768,7 +760,6 @@ function setScenarioView(v){
 }
 
 function addPhase(){
-  function addPhase(){
   const existing=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
   phaseCounter=existing.length+1;
   const id=phaseCounter;
@@ -791,24 +782,21 @@ function addPhase(){
     <div><div class="form-label">Or start same time as phase</div><select class="form-input" id="pw-${id}" style="cursor:pointer"><option value="">— none —</option></select></div>`;
   document.getElementById('phase-list').appendChild(div);
   refreshWithOptions();
+  renumberPhases();
 }
 function removePhase(id){
   document.getElementById(`phase-${id}`)?.remove();
   refreshWithOptions();
-  // Renumber remaining phase labels so they always show 1,2,3...
-  function removePhase(id){
-  document.getElementById(`phase-${id}`)?.remove();
-  refreshWithOptions();
-  setTimeout(()=>{
-    [...document.querySelectorAll('[id^="phase-"]')]
-      .filter(el=>el.id.match(/^phase-\d+$/))
-      .forEach((el,i)=>{
-        const lbl=el.querySelector('.phase-label');
-        if(lbl) lbl.textContent='Phase '+(i+1);
-        });
-      }, 0);
-    }
-  }
+  setTimeout(renumberPhases,0);
+}
+function renumberPhases(){
+  [...document.querySelectorAll('[id^="phase-"]')]
+    .filter(el=>el.id.match(/^phase-\d+$/))
+    .forEach((el,i)=>{
+      const lbl=el.querySelector('.phase-label');
+      if(lbl) lbl.textContent='Phase '+(i+1);
+    });
+}
 function refreshWithOptions(){
   const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
   phases.forEach(phaseEl=>{
@@ -1002,25 +990,29 @@ function setStatus(state,text){
     span.textContent=text;
   }
 }
+
+
 function saveState() {
   try {
     localStorage.setItem('rg_state', JSON.stringify({
-      page:     document.querySelector('.nav-tab.active')?.textContent?.trim(),
-      team:     document.getElementById('team-filter')?.value,
-      weekFrom: document.getElementById('week-range-from')?.value,
-      weekTo:   document.getElementById('week-range-to')?.value,
-      engTeam:  document.getElementById('eng-team-filter')?.value,
+      pageId:      document.querySelector('.page.active')?.id?.replace('page-',''),
+      team:        document.getElementById('team-filter')?.value,
+      weekFrom:    document.getElementById('week-range-from')?.value,
+      weekTo:      document.getElementById('week-range-to')?.value,
+      engTeam:     document.getElementById('eng-team-filter')?.value,
+      engWeekFrom: document.getElementById('eng-week-from')?.value,
+      engWeekTo:   document.getElementById('eng-week-to')?.value,
+      heatmap:     document.getElementById('heatmap-filter')?.value,
       viewMode,
       settings: SETTINGS,
     }));
   } catch(e) {}
 }
-//saving the state to be used in restoreState to maintain the current work when page refresh
+
 function restoreState() {
   try {
     const s = JSON.parse(localStorage.getItem('rg_state') || 'null');
     if (!s) return;
-    // Restore settings toggles
     if (s.settings) {
       SETTINGS = s.settings;
       Object.entries(s.settings).forEach(([k,v]) => {
@@ -1028,21 +1020,40 @@ function restoreState() {
         if (el) el.checked = v;
       });
     }
-    // Restore filters
-    if (s.team) { const el = document.getElementById('team-filter'); if(el) el.value = s.team; }
-    if (s.weekFrom) { const el = document.getElementById('week-range-from'); if(el) el.value = s.weekFrom; }
-    if (s.weekTo) { const el = document.getElementById('week-range-to'); if(el) el.value = s.weekTo; }
-    if (s.engTeam) { const el = document.getElementById('eng-team-filter'); if(el) el.value = s.engTeam; }
-    // Restore view mode
-    if (s.viewMode) setViewMode(s.viewMode);
-    // Restore active tab
-    if (s.page) {
-      const tab = [...document.querySelectorAll('.nav-tab')].find(t => t.textContent.trim() === s.page);
-      if (tab) tab.click();
+    if (s.viewMode && s.viewMode !== viewMode) {
+      viewMode = s.viewMode;
+      document.querySelectorAll('#view-toggle .pill').forEach((p,i)=>{
+        p.classList.toggle('active',(i===0&&s.viewMode==='team')||(i===1&&s.viewMode==='engineer'));
+      });
+    }
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val && el.querySelector(`option[value="${val}"]`)) el.value = val;
+    };
+    set('team-filter',     s.team);
+    set('week-range-from', s.weekFrom);
+    set('week-range-to',   s.weekTo);
+    set('eng-team-filter', s.engTeam);
+    set('eng-week-from',   s.engWeekFrom);
+    set('eng-week-to',     s.engWeekTo);
+    set('heatmap-filter',  s.heatmap);
+    if (s.pageId) {
+      const pageEl = document.getElementById('page-'+s.pageId);
+      const tabEl  = [...document.querySelectorAll('.nav-tab')].find(t=>t.getAttribute('onclick')?.includes("'"+s.pageId+"'"));
+      if (pageEl && tabEl) {
+        document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+        document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+        pageEl.classList.add('active');
+        tabEl.classList.add('active');
+        if(s.pageId==='heatmap') renderHeatmap();
+        else if(s.pageId==='engineers') renderEngineers();
+        else if(s.pageId==='scenario') renderScenario();
+      }
     }
     renderUtilisation();
-  } catch(e) {}
+  } catch(e) { console.warn('restoreState error:', e); }
 }
+
 // ── Live data loading ─────────────────────────────────────────────────────────
 async function loadLiveData(){
   setStatus('loading','Fetching from Resource Guru...');
@@ -1063,8 +1074,7 @@ async function loadLiveData(){
       info.textContent=`${engs} engineers · ${[...new Set(RAW.teams.map(r=>r.team))].length} teams · ${wks.length} weeks`;
     }
     init();
-    restoreState();
-    if(savedTeam&&savedTeam!=='ALL'){document.getElementById('team-filter').value=savedTeam;renderUtilisation();}
+    setTimeout(restoreState, 100);
     const wl=[...new Set((data.teams||[]).map(r=>r.week))].length;
     setTimeout(loadLiveData,wl<10?45000:300000);
   }catch(err){
