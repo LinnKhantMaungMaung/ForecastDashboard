@@ -760,7 +760,7 @@ function addPhase(){
   div.style.cssText='background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
   div.innerHTML=`
     <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
-    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em" id="phase-label-${id}">Phase ${id}</div>    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+     <div class="phase-label" style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
       <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
     </div>
@@ -776,12 +776,13 @@ function addPhase(){
 function removePhase(id) {
   document.getElementById(`phase-${id}`)?.remove();
   refreshWithOptions();
-  // Renumber remaining phases
-  const remaining = [...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
-  remaining.forEach((el, i) => {
-    const lbl = el.querySelector('[id^="phase-label-"]');
-    if (lbl) lbl.textContent = `Phase ${i+1}`;
-  });
+  // Renumber remaining phase labels
+  [...document.querySelectorAll('[id^="phase-"]')]
+    .filter(el => el.id.match(/^phase-\d+$/))
+    .forEach((el, i) => {
+      const lbl = el.querySelector('.phase-label');
+      if (lbl) lbl.textContent = `Phase ${i + 1}`;
+    });
 }
 function addProject(){
   const name=document.getElementById('proj-name').value.trim();
