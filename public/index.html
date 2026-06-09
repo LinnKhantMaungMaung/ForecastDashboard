@@ -499,9 +499,9 @@ function getExcludedNames() {
   for (const e of RAW.engineer_list||[]) {
     if (!SETTINGS.employees && !e.isContractor) { ex.add(e.name); continue; }
     if (!SETTINGS.contractors && e.isContractor) { ex.add(e.name); continue; }
-    if (!SETTINGS.directors && e.seniority==='director') { ex.add(e.name); continue; }
-    if (!SETTINGS.managers && e.seniority==='manager') { ex.add(e.name); continue; }
-    if (!SETTINGS.staff && e.seniority==='staff') { ex.add(e.name); continue; }
+    if (!SETTINGS.directors && e.seniority?.toLowerCase()==='director') { ex.add(e.name); continue; }
+    if (!SETTINGS.managers && e.seniority?.toLowerCase()==='manager') { ex.add(e.name); continue; }
+    if (!SETTINGS.staff && e.seniority?.toLowerCase()==='staff') { ex.add(e.name); continue; }
   }
   return ex;
 }
@@ -672,10 +672,7 @@ function renderEngineerViewOnMain(tf,weeks){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'){
-      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
-      if(!depts.includes(tf)) continue;
-    }
+    if(tf!=='ALL'&&r.team!==tf)continue;
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
@@ -725,10 +722,7 @@ function renderEngineers(){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'){
-      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
-      if(!depts.includes(tf)) continue;
-    }
+    if(tf!=='ALL'&&r.team!==tf)continue;
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
@@ -772,7 +766,7 @@ function addPhase(){
   div.style.cssText='background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
   div.innerHTML=`
     <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
-    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
+    <div class="phase-label" style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
       <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
@@ -786,7 +780,17 @@ function addPhase(){
   document.getElementById('phase-list').appendChild(div);
   refreshWithOptions();
 }
-function removePhase(id){ document.getElementById(`phase-${id}`)?.remove(); refreshWithOptions(); }
+function removePhase(id){
+  document.getElementById(`phase-${id}`)?.remove();
+  refreshWithOptions();
+  // Renumber remaining phase labels so they always show 1,2,3...
+  [...document.querySelectorAll('[id^="phase-"]')]
+    .filter(el=>el.id.match(/^phase-\d+$/))
+    .forEach((el,i)=>{
+      const lbl=el.querySelector('.phase-label');
+      if(lbl) lbl.textContent=`Phase ${i+1}`;
+    });
+}
 function refreshWithOptions(){
   const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
   phases.forEach(phaseEl=>{
@@ -893,7 +897,10 @@ function renderScenario(){
   const ctx=document.getElementById('scenario-chart').getContext('2d');
   scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>w.replace(/\d+ /,'')),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}});
   const bn=[];
-  for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;if(x===0&&!addPersonForecast)continue;const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>85)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
+  for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;
+        // Only show in bottleneck if this team has actual forecast load
+        if(x===0)continue;
+        const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>85)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
   let ah='';const crit={},warn={};
   for(const b of bn){if(b.projPct>95)(crit[b.team]=crit[b.team]||[]).push(b);else(warn[b.team]=warn[b.team]||[]).push(b);}
   for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} wk(s): ${bs.map(b=>b.week.replace(/\d+ /,'')).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
