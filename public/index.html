@@ -491,6 +491,7 @@ function applySettings() {
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
   renderScenario();
+  saveState();
 }
 
 // ── Filtered data helpers ─────────────────────────────────────────────────────
@@ -992,83 +993,100 @@ function setStatus(state,text){
 }
 
 
+// ── State persistence ──────────────────────────────────────────────────────────
+let _restoring = false;
+
 function saveState() {
   if (_restoring) return;
   try {
     localStorage.setItem('rg_state', JSON.stringify({
-      pageId:          document.querySelector('.page.active')?.id?.replace('page-',''),
-      team:            document.getElementById('team-filter')?.value,
-      weekFrom:        document.getElementById('week-range-from')?.value,
-      weekTo:          document.getElementById('week-range-to')?.value,
-      engTeam:         document.getElementById('eng-team-filter')?.value,
-      engWeekFrom:     document.getElementById('eng-week-from')?.value,
-      engWeekTo:       document.getElementById('eng-week-to')?.value,
-      heatmap:         document.getElementById('heatmap-filter')?.value,
-      scenarioTeam:    document.getElementById('scenario-team-select')?.value,
-      viewMode,
-      settings:        SETTINGS,
+      pageId:           document.querySelector('.page.active')?.id?.replace('page-',''),
+      team:             document.getElementById('team-filter')?.value,
+      weekFrom:         document.getElementById('week-range-from')?.value,
+      weekTo:           document.getElementById('week-range-to')?.value,
+      engTeam:          document.getElementById('eng-team-filter')?.value,
+      engWeekFrom:      document.getElementById('eng-week-from')?.value,
+      engWeekTo:        document.getElementById('eng-week-to')?.value,
+      heatmap:          document.getElementById('heatmap-filter')?.value,
+      scenarioTeam:     document.getElementById('scenario-team-select')?.value,
+      viewMode:         viewMode,
+      settings:         SETTINGS,
       forecastProjects: forecastProjects,
     }));
   } catch(e) {}
 }
-
-let _restoring = false; // flag to suppress saveState during restore
 
 function restoreState() {
   try {
     const s = JSON.parse(localStorage.getItem('rg_state') || 'null');
     if (!s) return;
     _restoring = true;
-    // Restore settings toggles + SETTINGS object
+
+    // 1. Restore SETTINGS object and toggle checkboxes
     if (s.settings) {
-      SETTINGS = { ...SETTINGS, ...s.settings };
-      Object.entries(s.settings).forEach(([k,v]) => {
-        const el = document.getElementById('s-'+k);
+      SETTINGS = Object.assign({}, SETTINGS, s.settings);
+      Object.entries(s.settings).forEach(([k, v]) => {
+        const el = document.getElementById('s-' + k);
         if (el) el.checked = v;
       });
     }
-    // Restore view mode
-    if (s.viewMode && s.viewMode !== viewMode) {
+
+    // 2. Restore view mode (team/engineer toggle) without triggering saves
+    if (s.viewMode) {
       viewMode = s.viewMode;
-      document.querySelectorAll('#view-toggle .pill').forEach((p,i)=>{
-        p.classList.toggle('active',(i===0&&s.viewMode==='team')||(i===1&&s.viewMode==='engineer'));
+      document.querySelectorAll('#view-toggle .pill').forEach((p, i) => {
+        p.classList.toggle('active', (i===0&&s.viewMode==='team')||(i===1&&s.viewMode==='engineer'));
       });
     }
-    // Restore forecast projects
-    if (s.forecastProjects && Array.isArray(s.forecastProjects)) {
+
+    // 3. Restore forecast projects
+    if (Array.isArray(s.forecastProjects) && s.forecastProjects.length > 0) {
       forecastProjects = s.forecastProjects;
       renderProjectList();
     }
-    // Helper: only set if option exists in dropdown
-    const set = (id, val) => {
+
+    // 4. Restore dropdown values — only if the option actually exists
+    function setDrop(id, val) {
+      if (!val) return;
       const el = document.getElementById(id);
-      if (el && val && el.querySelector(`option[value="${val}"]`)) el.value = val;
-    };
-    set('team-filter',          s.team);
-    set('week-range-from',      s.weekFrom);
-    set('week-range-to',        s.weekTo);
-    set('eng-team-filter',      s.engTeam);
-    set('eng-week-from',        s.engWeekFrom);
-    set('eng-week-to',          s.engWeekTo);
-    set('heatmap-filter',       s.heatmap);
-    set('scenario-team-select', s.scenarioTeam);
+      if (!el) return;
+      // Wait until options are populated
+      const opt = el.querySelector('option[value="' + val + '"]');
+      if (opt) el.value = val;
+    }
+    setDrop('team-filter',          s.team);
+    setDrop('week-range-from',      s.weekFrom);
+    setDrop('week-range-to',        s.weekTo);
+    setDrop('eng-team-filter',      s.engTeam);
+    setDrop('eng-week-from',        s.engWeekFrom);
+    setDrop('eng-week-to',          s.engWeekTo);
+    setDrop('heatmap-filter',       s.heatmap);
+    setDrop('scenario-team-select', s.scenarioTeam);
+
+    // 5. Switch to saved tab (without triggering saveState)
     if (s.pageId) {
-      const pageEl = document.getElementById('page-'+s.pageId);
-      const tabEl  = [...document.querySelectorAll('.nav-tab')].find(t=>t.getAttribute('onclick')?.includes("'"+s.pageId+"'"));
+      const pageEl = document.getElementById('page-' + s.pageId);
+      const tabEl  = [...document.querySelectorAll('.nav-tab')]
+        .find(t => (t.getAttribute('onclick') || '').includes("'" + s.pageId + "'"));
       if (pageEl && tabEl) {
-        document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
-        document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.nav-tab').forEach(x => x.classList.remove('active'));
         pageEl.classList.add('active');
         tabEl.classList.add('active');
       }
     }
-    // Re-render with restored filters and settings (order matters)
+
+    // 6. Re-render everything with restored state
     renderUtilisation();
-    if (s.pageId === 'heatmap') renderHeatmap();
-    else if (s.pageId === 'engineers') renderEngineers();
-    else if (s.pageId === 'scenario') renderScenario();
+    if (s.pageId === 'heatmap')    renderHeatmap();
+    if (s.pageId === 'engineers')  renderEngineers();
+    if (s.pageId === 'scenario')   renderScenario();
+
     _restoring = false;
-  } catch(e) { console.warn('restoreState error:', e); _restoring = false; }
+  } catch(e) {
+    _restoring = false;
+    console.warn('restoreState error:', e);
+  }
 }
 
 // ── Live data loading ─────────────────────────────────────────────────────────
