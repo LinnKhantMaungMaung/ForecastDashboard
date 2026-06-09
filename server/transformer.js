@@ -85,7 +85,7 @@ function getSeniority(job_title) {
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
   console.log(`[Transform] Building data for ${weeks.length} weeks (${from} → ${to})`);
-
+  const deptOptionLookup = {};
   // ── Step 1: Fetch resource metadata (groups, resource_type, job_title) ──────
   // This is the call that gives us real department/group data from RG.
   // Endpoint: GET /v1/{account}/resources
@@ -177,9 +177,15 @@ async function buildRawData(from, to) {
       // Skip non-people (equipment, rooms etc)
       if (meta.isEquipment) continue;
 
-      // Team: use RG group if available, otherwise fall back to job title mapping
-      const team = meta.group || getTeamFromJobTitle(job_title);
-
+      // Team: priority order:
+      // 1. custom_fields from report data (most up-to-date, comes directly from RG)
+      // 2. meta.group from pre-fetched /resources (also from RG)
+      // 3. job title fallback
+      const reportDeptIds = r.custom_fields?.['81460'] || [];
+      const reportDept    = reportDeptIds.length > 0 ? deptOptionLookup[reportDeptIds[0]] : null;
+      const team = reportDept || meta.group || getTeamFromJobTitle(job_title);
+      const reportContractorIds    = r.custom_fields?.['81461'] || [];
+      const isContractorFromReport = reportContractorIds.includes(172385);
       // RG reports values are in MINUTES — convert to hours
       const avail     = +((r.availability  || 0) / 60).toFixed(2);
       const util      = +((r.booked        || 0) / 60).toFixed(2);
@@ -188,10 +194,10 @@ async function buildRawData(from, to) {
       // Engineer list (unique per person, last-write wins for team assignment)
       engineerList[name] = {
         name, team, job_title,
-        isContractor:  meta.isContractor,
+        isContractor:  isContractorFromReport || meta.isContractor,
         resourceType:  meta.resourceTypeName,
         seniority:     meta.seniority,
-        group:         meta.group,   // null = team came from job title mapping
+        group:         reportDept || meta.group,  // null = team came from job title mapping
       };
 
       // Engineer weekly row
@@ -200,7 +206,7 @@ async function buildRawData(from, to) {
         available_hours: avail,
         utilized_hours:  util,
         tentative_hours: tentative,
-        isContractor:    meta.isContractor,
+        isContractor:    isContractorFromReport || meta.isContractor,
         seniority:       meta.seniority,
       };
 
