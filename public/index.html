@@ -672,7 +672,10 @@ function renderEngineerViewOnMain(tf,weeks){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'&&r.team!==tf)continue;
+    if(tf!=='ALL'){
+      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
+      if(!depts.includes(tf)) continue;
+    }
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
@@ -722,7 +725,10 @@ function renderEngineers(){
   const map={};
   for(const r of fe){
     if(!weeks.includes(r.week))continue;
-    if(tf!=='ALL'&&r.team!==tf)continue;
+    if(tf!=='ALL'){
+      const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
+      if(!depts.includes(tf)) continue;
+    }
     if(!map[r.name])map[r.name]={name:r.name,team:r.team,job:r.job_title,avail:0,util:0};
     map[r.name].avail+=r.available_hours;
     map[r.name].util +=r.utilized_hours;
