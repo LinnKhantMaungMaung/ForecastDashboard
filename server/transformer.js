@@ -76,8 +76,8 @@ function getTeamFromJobTitle(jt) {
 // ── Seniority from job title ──────────────────────────────────────────────────
 function getSeniority(job_title) {
   const jt = job_title || '';
-  if (/director|managing director|executive director|chief/i.test(jt)) return 'director';
-  if (/manager|head of/i.test(jt)) return 'manager';
+  if (/director|managing director|executive director|chief|group managing/i.test(jt)) return 'director';
+  if (/\bmanager\b|head of|senior manager|lead controls|lead design/i.test(jt)) return 'manager';
   return 'staff';
 }
 
@@ -103,20 +103,33 @@ async function buildRawData(from, to) {
       console.log(`[Transform] Resource types from RG: ${resourceTypes.map(rt => rt.name).join(', ')}`);
     }
 
+    // Build department option ID → name lookup from custom field 81460
+    const deptOptionLookup = {};
+    const personType = Array.isArray(resourceTypes) ? resourceTypes.find(rt => rt.id === 225004) : null;
+    const deptField  = personType?.custom_fields?.find(cf => cf.id === 81460);
+    if (deptField) {
+      deptField.custom_field_options.forEach(opt => { deptOptionLookup[opt.id] = opt.value; });
+      console.log(`[Transform] Department options loaded: ${Object.keys(deptOptionLookup).length}`);
+    }
+
     if (Array.isArray(resources)) {
       resources.forEach(r => {
-        // RG returns groups as an array: [{ id, name, ... }]
-        // First group = primary department/team
-        const groupName = null;
+        // Department comes from custom_field 81460 (option IDs stored as array)
+        const deptIds   = r.custom_fields?.['81460'] || [];
+        const groupName = deptIds.length > 0 ? deptOptionLookup[deptIds[0]] : null;
+
+        // Contractor/Employee from custom_field 81461 — option 172385 = Contractor
+        const contractorIds = r.custom_fields?.['81461'] || [];
+        const isContractor  = contractorIds.includes(172385);
 
         const rtName = r.resource_type?.name
           || typeMap[r.resource_type?.id]
           || 'Person';
 
         resourceMeta[r.name] = {
-          group:            groupName,          // real RG department — null if not configured
+          group:            groupName,
           resourceTypeName: rtName,
-          isContractor:     /contractor/i.test(rtName),
+          isContractor,
           isEquipment:      /equipment|machine|room|vehicle/i.test(rtName),
           seniority:        getSeniority(r.job_title),
           job_title:        r.job_title || '',
