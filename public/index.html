@@ -168,9 +168,9 @@
         <div class="pill active" onclick="setViewMode('team')">Team</div>
         <div class="pill" onclick="setViewMode('engineer')">Engineer</div>
       </div>
-      <select id="team-filter" onchange="renderUtilisation()"><option value="ALL">All Teams</option></select>
-      <select id="week-range-from" onchange="renderUtilisation()"></select>
-      <select id="week-range-to" onchange="renderUtilisation()"></select>
+      <select id="team-filter" onchange="renderUtilisation();saveState()"><option value="ALL">All Teams</option></select>
+      <select id="week-range-from" onchange="renderUtilisation();saveState()"></select>
+      <select id="week-range-to" onchange="renderUtilisation();saveState()"></select>
     </div>
   </div>
   <div class="kpi-grid" id="kpi-grid"></div>
@@ -206,7 +206,7 @@
       <div class="page-subtitle">Team × Week · colour = utilisation %</div>
     </div>
     <div class="controls">
-      <select id="heatmap-filter" onchange="renderHeatmap()"><option value="ALL">All Teams</option></select>
+      <select id="heatmap-filter" onchange="renderHeatmap();saveState()"><option value="ALL">All Teams</option></select>
     </div>
   </div>
   <div class="chart-card">
@@ -235,9 +235,9 @@
       <div class="page-subtitle">Individual weekly breakdown</div>
     </div>
     <div class="controls">
-      <select id="eng-team-filter" onchange="renderEngineers()"><option value="ALL">All Teams</option></select>
-      <select id="eng-week-from" onchange="renderEngineers()"></select>
-      <select id="eng-week-to" onchange="renderEngineers()"></select>
+      <select id="eng-team-filter" onchange="renderEngineers();saveState()"><option value="ALL">All Teams</option></select>
+      <select id="eng-week-from" onchange="renderEngineers();saveState()"></select>
+      <select id="eng-week-to" onchange="renderEngineers();saveState()"></select>
     </div>
   </div>
   <div class="chart-card">
@@ -343,7 +343,7 @@
               <div class="chart-card-title">Projected vs Actual Utilisation</div>
               <div class="chart-card-subtitle">Baseline (solid) + forecasted load (dashed)</div>
             </div>
-            <select id="scenario-team-select" onchange="renderScenario()" style="min-width:180px"></select>
+            <select id="scenario-team-select" onchange="renderScenario();saveState()" style="min-width:180px"></select>
           </div>
           <div class="chart-container" style="height:340px"><canvas id="scenario-chart"></canvas></div>
         </div>
@@ -842,9 +842,10 @@ function addProject(){
   phaseCounter=0;
   renderProjectList();
   renderScenario();
+  saveState();
 }
-function removeProject(id){forecastProjects=forecastProjects.filter(p=>p.id!==id);renderProjectList();renderScenario();}
-function clearProjects(){forecastProjects=[];renderProjectList();renderScenario();}
+function removeProject(id){forecastProjects=forecastProjects.filter(p=>p.id!==id);renderProjectList();renderScenario();saveState();}
+function clearProjects(){forecastProjects=[];renderProjectList();renderScenario();saveState();}
 function renderProjectList(){
   const el=document.getElementById('project-list');
   const cw=document.getElementById('clear-btn-wrap');
