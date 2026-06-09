@@ -491,6 +491,7 @@ function applySettings() {
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
   renderScenario();
+  saveState();
 }
 
 // ── Filtered data helpers ─────────────────────────────────────────────────────
@@ -576,6 +577,7 @@ function showPage(p, el) {
   if (p==='heatmap') renderHeatmap();
   if (p==='engineers') renderEngineers();
   if (p==='scenario') renderScenario();
+  saveState();
 }
 
 // ── View mode ─────────────────────────────────────────────────────────────────
@@ -585,6 +587,7 @@ function setViewMode(m) {
     p.classList.toggle('active',(i===0&&m==='team')||(i===1&&m==='engineer'));
   });
   renderUtilisation();
+  saveState();
 }
 
 // ── Util helpers ──────────────────────────────────────────────────────────────
@@ -613,6 +616,7 @@ function renderUtilisation(){
   const weeks=getFilteredWeeks('week-range-from','week-range-to');
   if(viewMode==='team') renderTeamView(tf,weeks);
   else renderEngineerViewOnMain(tf,weeks);
+  saveState();
 }
 
 function aggregateTeamWeekly(teamFilter,weeks){
@@ -790,13 +794,19 @@ function removePhase(id){
   document.getElementById(`phase-${id}`)?.remove();
   refreshWithOptions();
   // Renumber remaining phase labels so they always show 1,2,3...
-  [...document.querySelectorAll('[id^="phase-"]')]
-    .filter(el=>el.id.match(/^phase-\d+$/))
-    .forEach((el,i)=>{
-      const lbl=el.querySelector('.phase-label');
-      if(lbl) lbl.textContent=`Phase ${i+1}`;
-    });
-}
+  function removePhase(id){
+  document.getElementById(`phase-${id}`)?.remove();
+  refreshWithOptions();
+  setTimeout(()=>{
+    [...document.querySelectorAll('[id^="phase-"]')]
+      .filter(el=>el.id.match(/^phase-\d+$/))
+      .forEach((el,i)=>{
+        const lbl=el.querySelector('.phase-label');
+        if(lbl) lbl.textContent='Phase '+(i+1);
+        });
+      }, 0);
+    }
+  }
 function refreshWithOptions(){
   const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
   phases.forEach(phaseEl=>{
@@ -990,7 +1000,47 @@ function setStatus(state,text){
     span.textContent=text;
   }
 }
-
+function saveState() {
+  try {
+    localStorage.setItem('rg_state', JSON.stringify({
+      page:     document.querySelector('.nav-tab.active')?.textContent?.trim(),
+      team:     document.getElementById('team-filter')?.value,
+      weekFrom: document.getElementById('week-range-from')?.value,
+      weekTo:   document.getElementById('week-range-to')?.value,
+      engTeam:  document.getElementById('eng-team-filter')?.value,
+      viewMode,
+      settings: SETTINGS,
+    }));
+  } catch(e) {}
+}
+//saving the state to be used in restoreState to maintain the current work when page refresh
+function restoreState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('rg_state') || 'null');
+    if (!s) return;
+    // Restore settings toggles
+    if (s.settings) {
+      SETTINGS = s.settings;
+      Object.entries(s.settings).forEach(([k,v]) => {
+        const el = document.getElementById('s-'+k);
+        if (el) el.checked = v;
+      });
+    }
+    // Restore filters
+    if (s.team) { const el = document.getElementById('team-filter'); if(el) el.value = s.team; }
+    if (s.weekFrom) { const el = document.getElementById('week-range-from'); if(el) el.value = s.weekFrom; }
+    if (s.weekTo) { const el = document.getElementById('week-range-to'); if(el) el.value = s.weekTo; }
+    if (s.engTeam) { const el = document.getElementById('eng-team-filter'); if(el) el.value = s.engTeam; }
+    // Restore view mode
+    if (s.viewMode) setViewMode(s.viewMode);
+    // Restore active tab
+    if (s.page) {
+      const tab = [...document.querySelectorAll('.nav-tab')].find(t => t.textContent.trim() === s.page);
+      if (tab) tab.click();
+    }
+    renderUtilisation();
+  } catch(e) {}
+}
 // ── Live data loading ─────────────────────────────────────────────────────────
 async function loadLiveData(){
   setStatus('loading','Fetching from Resource Guru...');
@@ -1011,6 +1061,7 @@ async function loadLiveData(){
       info.textContent=`${engs} engineers · ${[...new Set(RAW.teams.map(r=>r.team))].length} teams · ${wks.length} weeks`;
     }
     init();
+    restoreState();
     if(savedTeam&&savedTeam!=='ALL'){document.getElementById('team-filter').value=savedTeam;renderUtilisation();}
     const wl=[...new Set((data.teams||[]).map(r=>r.week))].length;
     setTimeout(loadLiveData,wl<10?45000:300000);
