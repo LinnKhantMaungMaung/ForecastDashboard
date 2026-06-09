@@ -510,11 +510,17 @@ function getFilteredTeams() {
   const map = {};
   for (const r of RAW.engineers) {
     if (ex.has(r.name)) continue;
-    const key = r.team+'|'+r.week;
-    if (!map[key]) map[key] = { week:r.week, team:r.team, available_hours:0, utilized_hours:0, _hc:new Set() };
-    map[key].available_hours += r.available_hours;
-    map[key].utilized_hours  += (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
-    map[key]._hc.add(r.name);
+    // Person may belong to multiple departments — contribute to each
+    const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
+    const share = depts.length;
+    const uHrs = (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
+    for (const team of depts) {
+      const key = team+'|'+r.week;
+      if (!map[key]) map[key] = { week:r.week, team, available_hours:0, utilized_hours:0, _hc:new Set() };
+      map[key].available_hours += +(r.available_hours / share).toFixed(2);
+      map[key].utilized_hours  += +(uHrs / share).toFixed(2);
+      map[key]._hc.add(r.name);
+    }
   }
   return Object.values(map).map(({_hc,...rest})=>({...rest,headcount:_hc.size}));
 }
@@ -760,7 +766,8 @@ function addPhase(){
   div.style.cssText='background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
   div.innerHTML=`
     <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
-     <div class="phase-label" style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
       <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
     </div>
@@ -773,16 +780,16 @@ function addPhase(){
   document.getElementById('phase-list').appendChild(div);
   refreshWithOptions();
 }
-function removePhase(id) {
-  document.getElementById(`phase-${id}`)?.remove();
-  refreshWithOptions();
-  // Renumber remaining phase labels
-  [...document.querySelectorAll('[id^="phase-"]')]
-    .filter(el => el.id.match(/^phase-\d+$/))
-    .forEach((el, i) => {
-      const lbl = el.querySelector('.phase-label');
-      if (lbl) lbl.textContent = `Phase ${i + 1}`;
-    });
+function removePhase(id){ document.getElementById(`phase-${id}`)?.remove(); refreshWithOptions(); }
+function refreshWithOptions(){
+  const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
+  phases.forEach(phaseEl=>{
+    const id=phaseEl.id.replace('phase-','');
+    const sel=document.getElementById(`pw-${id}`);
+    if(!sel)return;
+    const others=phases.filter(p=>p.id!==`phase-${id}`);
+    sel.innerHTML='<option value="">— none —</option>'+others.map(p=>{const pid=p.id.replace('phase-','');const t=document.getElementById(`pt-${pid}`)?.value||`Phase ${pid}`;return`<option value="${pid}">Phase ${pid} (${t})</option>`;}).join('');
+  });
 }
 function addProject(){
   const name=document.getElementById('proj-name').value.trim();
