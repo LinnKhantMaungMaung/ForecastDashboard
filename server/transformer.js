@@ -1,19 +1,6 @@
 // server/transformer.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Converts Resource Guru API responses into the RAW shape the dashboard needs.
-//
-// Department and Contractor/Employee come from custom_fields in the report data:
-//   custom_fields["81460"] = [<department_option_id>]   → Department name
-//   custom_fields["81461"] = [172385=Contractor | 172386=Employee]
-//
-// The option ID → name mapping is built from /resource_types at startup.
-// This means any department changes in Resource Guru are picked up automatically
-// on the next cache refresh — no code changes needed.
-// ─────────────────────────────────────────────────────────────────────────────
-
 const { fetchReportRange, fetchResources, fetchResourceTypes, sleep } = require('./resourceGuru');
 
-// ── ISO week label "YYYY Www" ─────────────────────────────────────────────────
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -49,7 +36,7 @@ function buildWeeks(from, to) {
   return weeks;
 }
 
-// ── Job title fallback (only used if no department custom field in data) ───────
+// Fallback team from job title — only used if no department set in RG
 function getTeamFromJobTitle(jt) {
   if (!jt) return 'Unassigned';
   if (/Installation Electrician|Electrical Labourer|QA Co-ordinator|\[SL\]Engineering Manager/i.test(jt)) return 'Electrical Installation';
@@ -65,10 +52,9 @@ function getTeamFromJobTitle(jt) {
   if (/Accounts|Business Support|Supply Chain|Logistics/i.test(jt)) return 'Office';
   if (/R&D/i.test(jt)) return 'R&D Engineer';
   if (/Control Systems Business Development/i.test(jt)) return 'Control Systems Business Development Architect';
-  return jt;
+  return 'Unassigned';
 }
 
-// ── Seniority from job title ──────────────────────────────────────────────────
 function getSeniority(job_title) {
   const jt = job_title || '';
   if (/director|managing director|executive director|chief|group managing/i.test(jt)) return 'director';
@@ -76,74 +62,56 @@ function getSeniority(job_title) {
   return 'staff';
 }
 
-// ── Skip non-billable placeholder/vehicle resource types ─────────────────────
-function isNonPerson(resourceTypeName, name) {
-  if (!resourceTypeName) return false;
-  if (/vehicle|conference|meeting room|miscellaneous/i.test(resourceTypeName)) return true;
-  // Placeholder resources start with "U " or are named patterns
-  if (resourceTypeName === 'Placeholder') return true;
-  return false;
+function isNonPerson(rtName) {
+  return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
 }
 
-// ── Main builder ──────────────────────────────────────────────────────────────
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
   console.log(`[Transform] Building data for ${weeks.length} weeks (${from} → ${to})`);
 
-  // These lookups are built from /resource_types and used throughout
-  // Declared outside try block so weekly loop can access them
-  const deptOptionLookup       = {};  // option_id → department name  (custom field 81460)
-  const contractorOptionId     = 172385; // custom field 81461: 172385=Contractor, 172386=Employee
-  let resourceMeta             = {};  // name → { isEquipment, resourceTypeName, seniority }
+  // Dept option lookup and resource metadata — declared outside try so weekly loop can use them
+  const deptOptionLookup   = {}; // option_id(number) → department name
+  const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
+  let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
 
-  // ── Step 1: Fetch resource type definitions and resource metadata ─────────
   try {
     const [resources, resourceTypes] = await Promise.all([
-      fetchResources(),     // GET /v1/{account}/resources
-      fetchResourceTypes(), // GET /v1/{account}/resource_types
+      fetchResources(),
+      fetchResourceTypes(),
     ]);
 
-    // Build resource type id → name map
-    const typeMap = {};
     if (Array.isArray(resourceTypes)) {
-      resourceTypes.forEach(rt => { typeMap[rt.id] = rt.name; });
-      console.log(`[Transform] Resource types: ${resourceTypes.map(rt => rt.name).join(', ')}`);
-
-      // Build department option ID → name lookup from custom field 81460
-      // This is in the "Person" resource type's custom_fields
+      // Build department option ID → name map from custom field 81460 on Person type
       const personType = resourceTypes.find(rt => rt.id === 225004);
       const deptField  = personType?.custom_fields?.find(cf => cf.id === 81460);
-      if (deptField && Array.isArray(deptField.custom_field_options)) {
+      if (deptField?.custom_field_options) {
         deptField.custom_field_options.forEach(opt => {
-          deptOptionLookup[opt.id] = opt.value;
+          deptOptionLookup[Number(opt.id)] = opt.value;
+          deptOptionLookup[String(opt.id)] = opt.value; // also index by string
         });
-        console.log(`[Transform] Department lookup built: ${Object.keys(deptOptionLookup).length} options`);
-        console.log(`[Transform] Departments: ${Object.values(deptOptionLookup).join(', ')}`);
-      } else {
-        console.warn('[Transform] Could not find department custom field 81460 in resource types');
+        console.log(`[Transform] Departments loaded: ${Object.values(deptOptionLookup).filter((v,i,a)=>a.indexOf(v)===i).join(', ')}`);
       }
     }
 
-    // Build per-resource metadata (equipment detection, seniority)
     if (Array.isArray(resources)) {
       resources.forEach(r => {
-        const rtName = r.resource_type?.name || typeMap[r.resource_type?.id] || 'Person';
+        const rtName = typeof r.resource_type === 'object'
+          ? r.resource_type?.name
+          : r.resource_type || 'Person';
         resourceMeta[r.name] = {
-          resourceTypeName: rtName,
-          isEquipment: isNonPerson(rtName, r.name),
+          isEquipment: isNonPerson(rtName),
           seniority:   getSeniority(r.job_title),
+          job_title:   r.job_title || '',
+          rtName,
         };
       });
-      console.log(`[Transform] Resource metadata loaded for ${Object.keys(resourceMeta).length} resources`);
+      console.log(`[Transform] Resource metadata: ${Object.keys(resourceMeta).length} resources`);
     }
   } catch (err) {
-    console.warn('[Transform] Could not fetch resource metadata:', err.message);
+    console.warn('[Transform] Metadata fetch failed:', err.message);
   }
 
-  // ── Step 2: Fetch weekly utilisation reports ──────────────────────────────
-  // Each report call returns all resources with their custom_fields (including
-  // department option IDs and contractor flag) for that specific week.
-  // We use the deptOptionLookup built above to convert IDs to names.
   const teamsMap     = {};
   const engineersMap = {};
   const engineerList = {};
@@ -166,66 +134,87 @@ async function buildRawData(from, to) {
       const name      = r.name;
       const job_title = r.job_title || '';
 
-      // Skip vehicles, rooms, placeholders
-      const rtName = r.resource_type || resourceMeta[name]?.resourceTypeName || 'Person';
-      if (isNonPerson(rtName, name)) continue;
-      // Also skip placeholder-style names (starting with "U " = unassigned placeholders)
-      if (/^U\s+/i.test(name) || name.startsWith('U ')) continue;
+      // Determine resource type — report returns it as a string e.g. "Person"
+      const rtName = typeof r.resource_type === 'object'
+        ? r.resource_type?.name
+        : r.resource_type || resourceMeta[name]?.rtName || 'Person';
 
-      // ── Department: read from custom_fields in report data ──────────────
-      // custom_fields["81460"] contains array of option IDs e.g. ["383350"]
-      // We map the first ID to a department name using deptOptionLookup
-      const deptIds   = r.custom_fields?.['81460'] || [];
-      const deptName  = deptIds.length > 0 ? deptOptionLookup[deptIds[0]] : null;
-      const team      = deptName || getTeamFromJobTitle(job_title);
+      // Skip non-person resources (vehicles, rooms, placeholders)
+      if (isNonPerson(rtName)) continue;
 
-      // ── Contractor: read from custom_fields["81461"] ────────────────────
-      // option 172385 = Contractor, 172386 = Employee
-      const contractorIds  = r.custom_fields?.['81461'] || [];
-      const isContractor   = contractorIds.includes(contractorOptionId) ||
-                             contractorIds.includes(String(contractorOptionId));
+      // ── Department: from custom_fields["81460"] array of option IDs ────
+      // People with NO department set get "Unassigned"
+      // People with MULTIPLE departments get one row per department (hours split)
+      const rawDeptIds = r.custom_fields?.['81460'] || [];
+      const deptNames  = rawDeptIds
+        .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
+        .filter(Boolean);
 
-      // ── Seniority: from job title ───────────────────────────────────────
-      const meta     = resourceMeta[name] || {};
-      const seniority = meta.seniority || getSeniority(job_title);
+      // If no department in RG custom fields, use job title fallback or Unassigned
+      const departments = deptNames.length > 0 ? deptNames : [getTeamFromJobTitle(job_title)];
+
+      // ── Contractor: custom_fields["81461"] — 172385 = Contractor ───────
+      const contractorIds = r.custom_fields?.['81461'] || [];
+      const isContractor  = contractorIds.map(Number).includes(CONTRACTOR_OPT_ID);
+
+      // ── Seniority ───────────────────────────────────────────────────────
+      // Use pre-fetched job_title from /resources if report job_title is empty
+      const resolvedJobTitle = job_title || resourceMeta[name]?.job_title || '';
+      const seniority = resourceMeta[name]?.seniority || getSeniority(resolvedJobTitle);
 
       // ── Hours (RG reports in MINUTES) ───────────────────────────────────
-      const avail     = +((r.availability || 0) / 60).toFixed(2);
-      const util      = +((r.booked       || 0) / 60).toFixed(2);
-      const tentative = +((r.waiting_list || 0) / 60).toFixed(2);
+      const totalAvail     = +((r.availability || 0) / 60).toFixed(2);
+      const totalUtil      = +((r.booked       || 0) / 60).toFixed(2);
+      const totalTentative = +((r.waiting_list || 0) / 60).toFixed(2);
 
-      // Engineer list — unique per person, holds latest metadata
+      // Split hours equally across departments if person has multiple
+      const share = departments.length;
+      const avail     = +(totalAvail     / share).toFixed(2);
+      const util      = +(totalUtil      / share).toFixed(2);
+      const tentative = +(totalTentative / share).toFixed(2);
+
+      // Use primary (first) department for engineer list and weekly rows
+      const primaryTeam = departments[0];
+
+      // Engineer list — store all departments as array
       engineerList[name] = {
-        name, team, job_title,
+        name,
+        team:         primaryTeam,
+        departments,  // all departments this person belongs to
+        job_title:    resolvedJobTitle,
         isContractor,
         resourceType: rtName,
         seniority,
-        department: deptName, // direct from RG, null if not set
       };
 
-      // Engineer weekly row
+      // Engineer weekly row (primary team only for chart simplicity)
       engineersMap[`${name}|${wk.label}`] = {
-        week: wk.label, name, team, job_title,
-        available_hours: avail,
-        utilized_hours:  util,
-        tentative_hours: tentative,
+        week: wk.label, name,
+        team:            primaryTeam,
+        departments,
+        job_title:       resolvedJobTitle,
+        available_hours: totalAvail,
+        utilized_hours:  totalUtil,
+        tentative_hours: totalTentative,
         isContractor,
         seniority,
       };
 
-      // Team weekly aggregate
-      const teamKey = `${team}|${wk.label}`;
-      if (!teamsMap[teamKey]) {
-        teamsMap[teamKey] = {
-          week: wk.label, team,
-          available_hours: 0, utilized_hours: 0, tentative_hours: 0,
-          _hc: new Set(),
-        };
+      // Team aggregates — contribute to ALL departments the person belongs to
+      for (const team of departments) {
+        const teamKey = `${team}|${wk.label}`;
+        if (!teamsMap[teamKey]) {
+          teamsMap[teamKey] = {
+            week: wk.label, team,
+            available_hours: 0, utilized_hours: 0, tentative_hours: 0,
+            _hc: new Set(),
+          };
+        }
+        teamsMap[teamKey].available_hours += avail;
+        teamsMap[teamKey].utilized_hours  += util;
+        teamsMap[teamKey].tentative_hours += tentative;
+        if (avail > 0 || util > 0) teamsMap[teamKey]._hc.add(name);
       }
-      teamsMap[teamKey].available_hours += avail;
-      teamsMap[teamKey].utilized_hours  += util;
-      teamsMap[teamKey].tentative_hours += tentative;
-      if (avail > 0 || util > 0) teamsMap[teamKey]._hc.add(name);
     }
 
     await sleep(150);
@@ -240,8 +229,9 @@ async function buildRawData(from, to) {
     headcount: _hc.size,
   }));
 
+  const teamNames = [...new Set(teams.map(t => t.team))].sort();
   console.log(`[Transform] Done — ${teams.length} team-week rows, ${Object.keys(engineersMap).length} engineer-week rows`);
-  console.log(`[Transform] Teams found: ${[...new Set(teams.map(t => t.team))].sort().join(', ')}`);
+  console.log(`[Transform] Teams: ${teamNames.join(', ')}`);
 
   return {
     teams:          teams.sort((a, b) => a.week.localeCompare(b.week) || a.team.localeCompare(b.team)),
