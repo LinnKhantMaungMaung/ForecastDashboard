@@ -760,8 +760,7 @@ function addPhase(){
   div.style.cssText='background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative';
   div.innerHTML=`
     <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
-    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+    <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em" id="phase-label-${id}">Phase ${id}</div>    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
       <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
     </div>
@@ -774,15 +773,14 @@ function addPhase(){
   document.getElementById('phase-list').appendChild(div);
   refreshWithOptions();
 }
-function removePhase(id){ document.getElementById(`phase-${id}`)?.remove(); refreshWithOptions(); }
-function refreshWithOptions(){
-  const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
-  phases.forEach(phaseEl=>{
-    const id=phaseEl.id.replace('phase-','');
-    const sel=document.getElementById(`pw-${id}`);
-    if(!sel)return;
-    const others=phases.filter(p=>p.id!==`phase-${id}`);
-    sel.innerHTML='<option value="">— none —</option>'+others.map(p=>{const pid=p.id.replace('phase-','');const t=document.getElementById(`pt-${pid}`)?.value||`Phase ${pid}`;return`<option value="${pid}">Phase ${pid} (${t})</option>`;}).join('');
+function removePhase(id) {
+  document.getElementById(`phase-${id}`)?.remove();
+  refreshWithOptions();
+  // Renumber remaining phases
+  const remaining = [...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
+  remaining.forEach((el, i) => {
+    const lbl = el.querySelector('[id^="phase-label-"]');
+    if (lbl) lbl.textContent = `Phase ${i+1}`;
   });
 }
 function addProject(){
