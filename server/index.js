@@ -24,7 +24,7 @@ const { buildRawData } = require('./transformer');
 
 const app      = express();
 const PORT     = process.env.PORT || 3000;
-const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '3600000', 10); // default 1 hour
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '600000', 10); // default 1 hour
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
