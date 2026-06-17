@@ -24,7 +24,7 @@ const { buildRawData } = require('./transformer');
 
 const app      = express();
 const PORT     = process.env.PORT || 3000;
-const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '600000', 10); // default 1 hour
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || '3600000', 10); // default 1 hour
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -34,7 +34,11 @@ app.use(express.static(path.join(__dirname, '../public')));
 let cache = { data: null, fetchedAt: null, expiresAt: null, building: false };
 const isCacheValid = () => cache.data && cache.expiresAt && new Date() < cache.expiresAt;
 
+// Custom date range — set by API call, defaults to current year Apr-Oct
+let customDateRange = null;
+
 function getDateRange() {
+  if (customDateRange) return customDateRange;
   const year = new Date().getFullYear();
   return { from: `${year}-04-01`, to: `${year}-10-03` };
 }
@@ -86,7 +90,16 @@ app.get('/api/health', (req, res) => {
 // Main data endpoint — returns full RAW object for the dashboard
 app.get('/api/utilisation', async (req, res) => {
   try {
-    if (req.query.refresh === '1') await refreshCache();
+    const customFrom = req.query.from;
+    const customTo   = req.query.to;
+    // Custom date range: set the range and do a full cache rebuild
+    if (req.query.refresh === '1' && customFrom && customTo) {
+      console.log(`[Cache] Setting custom range: ${customFrom} → ${customTo}`);
+      customDateRange = { from: customFrom, to: customTo };
+      await refreshCache();
+    } else if (req.query.refresh === '1') {
+      await refreshCache();
+    }
     if (!cache.data) {
       return res.status(503).json({
         error: 'Data is still being built. Retry in ~30 seconds.',
@@ -98,6 +111,13 @@ app.get('/api/utilisation', async (req, res) => {
     console.error('[/api/utilisation]', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Reset to default date range
+app.get('/api/reset-range', async (req, res) => {
+  customDateRange = null;
+  await refreshCache();
+  res.json({ ok: true, range: getDateRange(), weeks: cache.data?.meta?.weeks });
 });
 
 // ── Debug routes ──────────────────────────────────────────────────────────────
