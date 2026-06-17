@@ -463,14 +463,11 @@
         <input class="search-input" id="bookings-proj-search" placeholder="Search projects..." oninput="filterBookingProjects()" style="width:160px">
       </div>
       <div style="overflow-x:auto;max-height:500px;overflow-y:auto">
-        <table>
-          <thead><tr>
-            <th onclick="sortBookings('proj','name')" style="cursor:pointer">Project</th>
-            <th onclick="sortBookings('proj','code')" style="cursor:pointer">Code</th>
-            <th onclick="sortBookings('proj','hours')" style="cursor:pointer;text-align:right">Hours</th>
-          </tr></thead>
-          <tbody id="bookings-proj-body"></tbody>
-        </table>
+        <table><thead><tr>
+          <th onclick="sortBookings('proj','name')" style="cursor:pointer">Project</th>
+          <th onclick="sortBookings('proj','code')" style="cursor:pointer">Code</th>
+          <th onclick="sortBookings('proj','hours')" style="cursor:pointer;text-align:right">Hours</th>
+        </tr></thead><tbody id="bookings-proj-body"></tbody></table>
       </div>
     </div>
     <div class="table-card">
@@ -479,16 +476,12 @@
         <input class="search-input" id="bookings-people-search" placeholder="Search people..." oninput="filterBookingPeople()" style="width:160px">
       </div>
       <div style="overflow-x:auto;max-height:500px;overflow-y:auto">
-        <table>
-          <thead><tr>
-            <th onclick="sortBookings('people','name')" style="cursor:pointer">Name</th>
-            <th onclick="sortBookings('people','dept')" style="cursor:pointer">Dept</th>
-            <th onclick="sortBookings('people','hours')" style="cursor:pointer;text-align:right">Hours</th>
-            <th>From</th>
-            <th>To</th>
-          </tr></thead>
-          <tbody id="bookings-people-body"></tbody>
-        </table>
+        <table><thead><tr>
+          <th onclick="sortBookings('people','name')" style="cursor:pointer">Name</th>
+          <th onclick="sortBookings('people','dept')" style="cursor:pointer">Dept</th>
+          <th onclick="sortBookings('people','hours')" style="cursor:pointer;text-align:right">Hours</th>
+          <th>From</th><th>To</th>
+        </tr></thead><tbody id="bookings-people-body"></tbody></table>
       </div>
     </div>
   </div>
@@ -1654,9 +1647,9 @@ async function resetToDefaultRange() {
 
 
 // ── Bookings tab ──────────────────────────────────────────────────────────────
-let BOOKINGS          = null;
-let bookingsWeekData  = null;
-let bookingsProjRows  = [];
+let BOOKINGS           = null;
+let bookingsWeekData   = null;
+let bookingsProjRows   = [];
 let bookingsPeopleRows = [];
 let bookingsProjSort   = { col:'hours', dir:-1 };
 let bookingsPeopleSort = { col:'hours', dir:-1 };
@@ -1668,13 +1661,17 @@ async function loadBookings() {
     if (sub) sub.textContent = 'Loading bookings from Resource Guru...';
     const res = await fetch('/api/bookings');
     if (res.status === 503) {
-      if (sub) sub.textContent = 'Building bookings data (~60s)...';
-      if (kpi) kpi.innerHTML = '<div class="kpi" style="grid-column:1/-1;text-align:center;padding:20px;color:var(--muted)"><div style="font-size:20px;margin-bottom:8px">⏳</div><div style="font-weight:700">Building bookings data from Resource Guru</div><div style="font-size:12px;margin-top:4px">This runs once after startup and takes about 60 seconds</div></div>';
-      setTimeout(loadBookings, 15000);
+      if (sub) sub.textContent = 'Building bookings data — retrying in 20s...';
+      if (kpi) kpi.innerHTML = '<div class="kpi" style="grid-column:1/-1;text-align:center;padding:20px;color:var(--muted)"><div style="font-size:24px;margin-bottom:8px">⏳</div><div style="font-weight:700;margin-bottom:4px">Building bookings data</div><div style="font-size:12px">Fetching from Resource Guru — should take 20–60 seconds</div></div>';
+      setTimeout(loadBookings, 20000);
       return;
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     BOOKINGS = await res.json();
+    if (!BOOKINGS || !BOOKINGS.weeks || BOOKINGS.weeks.length === 0) {
+      if (sub) sub.textContent = 'No bookings data available for this period';
+      return;
+    }
     const sel = document.getElementById('bookings-week');
     if (sel) {
       sel.innerHTML = BOOKINGS.weeks.map(w => '<option value="' + w + '">' + w + '</option>').join('');
@@ -1712,34 +1709,14 @@ function renderBookings() {
   if (!week) return;
   bookingsWeekData = BOOKINGS.weekly[week];
   if (!bookingsWeekData) return;
-
   const sub = document.getElementById('bookings-subtitle');
   if (sub) sub.textContent = 'Week ' + week;
-
   const h = bookingsWeekData.header;
-  const totalPct = h.totalHours > 0;
   document.getElementById('bookings-kpi').innerHTML =
-    '<div class="kpi" style="--kpi-color:var(--accent)">' +
-      '<div class="kpi-label">Total Hours</div>' +
-      '<div class="kpi-value">' + h.totalHours.toFixed(0) + '</div>' +
-      '<div class="kpi-sub">' + week + '</div>' +
-    '</div>' +
-    '<div class="kpi" style="--kpi-color:var(--green)">' +
-      '<div class="kpi-label">Employee Hours</div>' +
-      '<div class="kpi-value" style="color:var(--green)">' + h.empHours.toFixed(0) + '</div>' +
-      '<div class="kpi-sub">' + (h.totalHours > 0 ? ((h.empHours/h.totalHours)*100).toFixed(0) : 0) + '% of total</div>' +
-    '</div>' +
-    '<div class="kpi" style="--kpi-color:var(--yellow)">' +
-      '<div class="kpi-label">Contractor Hours</div>' +
-      '<div class="kpi-value" style="color:var(--yellow)">' + h.contractorHours.toFixed(0) + '</div>' +
-      '<div class="kpi-sub">' + (h.totalHours > 0 ? ((h.contractorHours/h.totalHours)*100).toFixed(0) : 0) + '% of total</div>' +
-    '</div>' +
-    '<div class="kpi" style="--kpi-color:var(--accent2)">' +
-      '<div class="kpi-label">Projects Active</div>' +
-      '<div class="kpi-value">' + h.projects + '</div>' +
-      '<div class="kpi-sub">this week</div>' +
-    '</div>';
-
+    '<div class="kpi" style="--kpi-color:var(--accent)"><div class="kpi-label">Total Hours</div><div class="kpi-value">' + h.totalHours.toFixed(0) + '</div><div class="kpi-sub">' + week + '</div></div>' +
+    '<div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-label">Employee Hours</div><div class="kpi-value" style="color:var(--green)">' + h.empHours.toFixed(0) + '</div><div class="kpi-sub">' + (h.totalHours>0?((h.empHours/h.totalHours)*100).toFixed(0):0) + '% of total</div></div>' +
+    '<div class="kpi" style="--kpi-color:var(--yellow)"><div class="kpi-label">Contractor Hours</div><div class="kpi-value" style="color:var(--yellow)">' + h.contractorHours.toFixed(0) + '</div><div class="kpi-sub">' + (h.totalHours>0?((h.contractorHours/h.totalHours)*100).toFixed(0):0) + '% of total</div></div>' +
+    '<div class="kpi" style="--kpi-color:var(--accent2)"><div class="kpi-label">Projects Active</div><div class="kpi-value">' + h.projects + '</div><div class="kpi-sub">this week</div></div>';
   renderDeptMatrix();
   bookingsProjRows   = bookingsWeekData.projects.slice();
   bookingsPeopleRows = bookingsWeekData.people.slice();
@@ -1754,105 +1731,42 @@ function renderDeptMatrix() {
   const allCats = new Set();
   Object.values(dm).forEach(cats => Object.keys(cats).forEach(c => allCats.add(c)));
   const CORE = ['Commissioning','Development','WCS PM','None'];
-  const cats = [
-    ...CORE.filter(c => allCats.has(c)),
-    ...[...allCats].filter(c => !CORE.includes(c)).sort()
-  ];
-  let depts = Object.entries(dm).map(([dept, catHrs]) => ({
-    dept,
-    catHrs,
-    total: Object.values(catHrs).reduce((s,v) => s+v, 0)
-  }));
-  if (sortBy === 'total') depts.sort((a,b) => b.total - a.total);
-  else depts.sort((a,b) => a.dept.localeCompare(b.dept));
-
-  const catHeaders = cats.map(c => '<th style="text-align:right;min-width:90px;font-size:11px">' + c + '</th>').join('');
-  const rows = depts.map(function(d) {
-    const cells = cats.map(function(c) {
-      const hrs = d.catHrs[c] || 0;
-      return '<td class="mono" style="text-align:right;color:' + (hrs > 0 ? 'var(--text)' : 'var(--muted)') + '">' + (hrs > 0 ? hrs.toFixed(1) : '—') + '</td>';
-    }).join('');
-    return '<tr><td style="font-weight:600;white-space:nowrap">' + d.dept + '</td>' + cells +
-      '<td class="mono" style="text-align:right;font-weight:700;color:var(--accent)">' + d.total.toFixed(1) + '</td></tr>';
+  const cats = [...CORE.filter(c=>allCats.has(c)), ...[...allCats].filter(c=>!CORE.includes(c)).sort()];
+  let depts = Object.entries(dm).map(([dept,catHrs])=>({dept,catHrs,total:Object.values(catHrs).reduce((s,v)=>s+v,0)}));
+  if (sortBy==='total') depts.sort((a,b)=>b.total-a.total); else depts.sort((a,b)=>a.dept.localeCompare(b.dept));
+  const catHeaders = cats.map(c=>'<th style="text-align:right;min-width:90px;font-size:11px">'+c+'</th>').join('');
+  const rows = depts.map(function(d){
+    const cells=cats.map(function(c){const hrs=d.catHrs[c]||0;return'<td class="mono" style="text-align:right;color:'+(hrs>0?'var(--text)':'var(--muted)')+'">'+(hrs>0?hrs.toFixed(1):'—')+'</td>';}).join('');
+    return'<tr><td style="font-weight:600;white-space:nowrap">'+d.dept+'</td>'+cells+'<td class="mono" style="text-align:right;font-weight:700;color:var(--accent)">'+d.total.toFixed(1)+'</td></tr>';
   }).join('');
-
-  const colTotals = cats.map(function(c) {
-    const t = Object.values(dm).reduce((s, catHrs) => s + (catHrs[c] || 0), 0);
-    return '<td class="mono" style="text-align:right;font-weight:700">' + t.toFixed(1) + '</td>';
-  }).join('');
-  const grandTotal = depts.reduce((s,d) => s + d.total, 0);
-
-  document.getElementById('bookings-dept-matrix').innerHTML =
-    '<table>' +
-      '<thead><tr>' +
-        '<th style="min-width:200px">Department</th>' +
-        catHeaders +
-        '<th style="text-align:right">Total</th>' +
-      '</tr></thead>' +
-      '<tbody>' + rows +
-        '<tr style="border-top:2px solid var(--border);background:var(--surface2)">' +
-          '<td style="font-weight:700">TOTAL</td>' + colTotals +
-          '<td class="mono" style="text-align:right;font-weight:700;color:var(--accent)">' + grandTotal.toFixed(1) + '</td>' +
-        '</tr>' +
-      '</tbody>' +
-    '</table>';
+  const colTotals=cats.map(function(c){const t=Object.values(dm).reduce((s,ch)=>s+(ch[c]||0),0);return'<td class="mono" style="text-align:right;font-weight:700">'+t.toFixed(1)+'</td>';}).join('');
+  const grand=depts.reduce((s,d)=>s+d.total,0);
+  document.getElementById('bookings-dept-matrix').innerHTML='<table><thead><tr><th style="min-width:200px">Department</th>'+catHeaders+'<th style="text-align:right">Total</th></tr></thead><tbody>'+rows+'<tr style="border-top:2px solid var(--border);background:var(--surface2)"><td style="font-weight:700">TOTAL</td>'+colTotals+'<td class="mono" style="text-align:right;font-weight:700;color:var(--accent)">'+grand.toFixed(1)+'</td></tr></tbody></table>';
 }
 
-function sortBookings(table, col) {
-  if (table === 'proj') {
-    if (bookingsProjSort.col === col) bookingsProjSort.dir *= -1;
-    else { bookingsProjSort.col = col; bookingsProjSort.dir = col === 'hours' ? -1 : 1; }
-    sortAndRenderProjects();
-  } else {
-    if (bookingsPeopleSort.col === col) bookingsPeopleSort.dir *= -1;
-    else { bookingsPeopleSort.col = col; bookingsPeopleSort.dir = col === 'hours' ? -1 : 1; }
-    sortAndRenderPeople();
-  }
+function sortBookings(table,col){
+  if(table==='proj'){if(bookingsProjSort.col===col)bookingsProjSort.dir*=-1;else{bookingsProjSort.col=col;bookingsProjSort.dir=col==='hours'?-1:1;}sortAndRenderProjects();}
+  else{if(bookingsPeopleSort.col===col)bookingsPeopleSort.dir*=-1;else{bookingsPeopleSort.col=col;bookingsPeopleSort.dir=col==='hours'?-1:1;}sortAndRenderPeople();}
 }
 
-function sortAndRenderProjects() {
-  const { col, dir } = bookingsProjSort;
-  const search = (document.getElementById('bookings-proj-search')?.value || '').toLowerCase();
-  const filtered = bookingsProjRows.filter(p =>
-    p.name.toLowerCase().includes(search) || String(p.code).toLowerCase().includes(search)
-  );
-  const sorted = filtered.slice().sort(function(a,b) {
-    if (col === 'hours') return (b.hours - a.hours) * dir;
-    return String(a[col]).localeCompare(String(b[col])) * dir;
-  });
-  document.getElementById('bookings-proj-body').innerHTML = sorted.map(p =>
-    '<tr>' +
-      '<td style="font-weight:600">' + p.name + '</td>' +
-      '<td class="mono" style="color:var(--muted)">' + p.code + '</td>' +
-      '<td class="mono" style="text-align:right">' + p.hours.toFixed(1) + '</td>' +
-    '</tr>'
-  ).join('') || '<tr><td colspan="3" class="empty">No projects</td></tr>';
+function sortAndRenderProjects(){
+  const {col,dir}=bookingsProjSort;
+  const search=(document.getElementById('bookings-proj-search')?.value||'').toLowerCase();
+  const filtered=bookingsProjRows.filter(p=>p.name.toLowerCase().includes(search)||String(p.code).toLowerCase().includes(search));
+  const sorted=filtered.slice().sort((a,b)=>col==='hours'?(b.hours-a.hours)*dir:String(a[col]).localeCompare(String(b[col]))*dir);
+  document.getElementById('bookings-proj-body').innerHTML=sorted.map(p=>'<tr><td style="font-weight:600">'+p.name+'</td><td class="mono" style="color:var(--muted)">'+p.code+'</td><td class="mono" style="text-align:right">'+p.hours.toFixed(1)+'</td></tr>').join('')||'<tr><td colspan="3" class="empty">No projects</td></tr>';
 }
 
-function sortAndRenderPeople() {
-  const { col, dir } = bookingsPeopleSort;
-  const search = (document.getElementById('bookings-people-search')?.value || '').toLowerCase();
-  const filtered = bookingsPeopleRows.filter(p =>
-    p.name.toLowerCase().includes(search) || p.dept.toLowerCase().includes(search)
-  );
-  const sorted = filtered.slice().sort(function(a,b) {
-    if (col === 'hours') return (b.hours - a.hours) * dir;
-    return String(a[col]).localeCompare(String(b[col])) * dir;
-  });
-  document.getElementById('bookings-people-body').innerHTML = sorted.map(function(p) {
-    const badge = p.empType === 'Contractor' ? ' <span class="badge badge-yellow" style="font-size:9px">C</span>' : '';
-    return '<tr>' +
-      '<td style="font-weight:600">' + p.name + badge + '</td>' +
-      '<td style="font-size:12px;color:var(--muted)">' + p.dept + '</td>' +
-      '<td class="mono" style="text-align:right">' + p.hours.toFixed(1) + '</td>' +
-      '<td class="mono" style="color:var(--muted);font-size:11px">' + (p.earliest||'—') + '</td>' +
-      '<td class="mono" style="color:var(--muted);font-size:11px">' + (p.latest||'—') + '</td>' +
-    '</tr>';
-  }).join('') || '<tr><td colspan="5" class="empty">No people</td></tr>';
+function sortAndRenderPeople(){
+  const {col,dir}=bookingsPeopleSort;
+  const search=(document.getElementById('bookings-people-search')?.value||'').toLowerCase();
+  const filtered=bookingsPeopleRows.filter(p=>p.name.toLowerCase().includes(search)||p.dept.toLowerCase().includes(search));
+  const sorted=filtered.slice().sort((a,b)=>col==='hours'?(b.hours-a.hours)*dir:String(a[col]).localeCompare(String(b[col]))*dir);
+  document.getElementById('bookings-people-body').innerHTML=sorted.map(function(p){const badge=p.empType==='Contractor'?' <span class="badge badge-yellow" style="font-size:9px">C</span>':'';return'<tr><td style="font-weight:600">'+p.name+badge+'</td><td style="font-size:12px;color:var(--muted)">'+p.dept+'</td><td class="mono" style="text-align:right">'+p.hours.toFixed(1)+'</td><td class="mono" style="color:var(--muted);font-size:11px">'+(p.earliest||'—')+'</td><td class="mono" style="color:var(--muted);font-size:11px">'+(p.latest||'—')+'</td></tr>';}).join('')||'<tr><td colspan="5" class="empty">No people</td></tr>';
 }
 
-function filterBookingProjects() { sortAndRenderProjects(); }
-function filterBookingPeople()   { sortAndRenderPeople(); }
+function filterBookingProjects(){sortAndRenderProjects();}
+function filterBookingPeople(){sortAndRenderPeople();}
 
 // ── Live data loading ─────────────────────────────────────────────────────────
 async function loadLiveData(){
