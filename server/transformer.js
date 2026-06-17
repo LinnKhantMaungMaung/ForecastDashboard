@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchBookingsForRange, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -242,17 +242,12 @@ async function buildRawData(from, to) {
   };
 }
 
-module.exports = { buildRawData, toWeekLabel, buildWeeks, getTeamFromJobTitle, getSeniority };
-
-
 // ── Bookings data builder ─────────────────────────────────────────────────────
 // Fetches all bookings for the date range and builds the same structure
 // as the Search sheet in the Excel export:
 //   - Per-week: header stats, dept×category matrix, project list, people list
 // This uses the same deptOptionLookup and date range as buildRawData.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const { fetchBookingsForRange } = require('./resourceGuru');
 
 async function buildBookingsData(from, to) {
   console.log(`[Bookings] Building bookings data ${from} → ${to}`);
@@ -262,7 +257,6 @@ async function buildBookingsData(from, to) {
   const CONTRACTOR_OPT_ID  = 172385;
 
   try {
-    const { fetchResourceTypes } = require('./resourceGuru');
     const resourceTypes = await fetchResourceTypes();
     if (Array.isArray(resourceTypes)) {
       const personType = resourceTypes.find(rt => rt.id === 225004);
