@@ -115,23 +115,59 @@ async function fetchReport(from, to) {
   return fetchReportRange(from, to);
 }
 
-// Bookings for a date range (paginated, gentle rate)
-// Used for any per-booking analysis — note: can be slow for large accounts
+// Bookings for a date range — split into monthly chunks fetched in parallel
+// This is much faster than a single sequential paginated fetch for large ranges
 async function fetchBookingsForRange(from, to) {
   console.log(`[RG] Fetching bookings ${from} → ${to}...`);
+
+  // Split the range into monthly chunks for parallel fetching
+  const chunks = [];
+  let cur = new Date(from);
+  const end = new Date(to);
+  while (cur <= end) {
+    const chunkFrom = cur.toISOString().slice(0, 10);
+    // End of month (or overall end, whichever is sooner)
+    const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+    const chunkTo  = monthEnd < end ? monthEnd.toISOString().slice(0, 10) : to;
+    chunks.push({ from: chunkFrom, to: chunkTo });
+    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+  }
+
+  console.log(`[RG] Fetching bookings in ${chunks.length} monthly chunks...`);
+
+  // Fetch all chunks in parallel (max 4 at a time to respect rate limits)
+  const allResults = [];
+  for (let i = 0; i < chunks.length; i += 4) {
+    const batch = chunks.slice(i, i + 4);
+    const batchResults = await Promise.all(batch.map(chunk => fetchBookingsPage(chunk.from, chunk.to)));
+    batchResults.forEach(r => allResults.push(...r));
+    if (i + 4 < chunks.length) await sleep(500); // brief pause between batches
+  }
+
+  console.log(`[RG] Fetched ${allResults.length} bookings total`);
+  return allResults;
+}
+
+// Fetch all pages of bookings for a single date chunk
+async function fetchBookingsPage(from, to) {
   const results = [];
   let page = 1;
   while (true) {
     const data = await rgGet('/bookings', {
-      start_date: from, end_date: to, per_page: 100, page,
+      start_date: from, end_date: to, per_page: 300, page,
     });
     if (!Array.isArray(data) || data.length === 0) break;
     results.push(...data);
-    if (data.length < 100) break;
+    if (data.length < 300) break;
     page++;
-    await sleep(300);
+    await sleep(200);
   }
   return results;
+}
+
+// Fetch a single page of bookings (for debugging field names)
+async function fetchBookingsSample(from, to) {
+  return rgGet('/bookings', { start_date: from, end_date: to, per_page: 3, page: 1 });
 }
 
 module.exports = {
@@ -141,6 +177,7 @@ module.exports = {
   fetchReport,
   fetchReportRange,
   fetchBookingsForRange,
+  fetchBookingsSample,
   sleep,
   BASE,
 };
