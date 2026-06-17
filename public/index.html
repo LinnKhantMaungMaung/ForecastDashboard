@@ -98,9 +98,9 @@
   .alert-body{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.5}
   .empty{text-align:center;padding:48px;color:var(--muted);font-size:14px}
   .heatmap-grid{overflow-x:auto}
-  .heatmap-table{border-collapse:separate;border-spacing:3px}
-  .heatmap-table th{padding:6px 8px;font-size:10px;font-weight:600;color:var(--muted);white-space:nowrap;background:transparent;cursor:default}
-  .heatmap-cell{width:46px;height:36px;border-radius:6px;text-align:center;font-size:10px;font-family:'DM Mono',monospace;font-weight:500;cursor:default;vertical-align:middle;transition:transform .1s}
+  .heatmap-table{border-collapse:collapse;border-spacing:0}
+  .heatmap-table th{padding:6px 4px;font-size:10px;font-weight:600;color:var(--muted);white-space:nowrap;background:transparent;cursor:default;text-align:center}
+  .heatmap-cell{width:46px;height:36px;border-radius:6px;text-align:center;font-size:10px;font-family:'DM Mono',monospace;font-weight:500;cursor:default;vertical-align:middle;transition:transform .1s;padding:2px}
   .heatmap-cell:hover{transform:scale(1.12);z-index:10;position:relative}
   .hm-0{background:var(--surface2);color:var(--muted)}
   .hm-1{background:rgba(34,197,94,.2);color:#4ade80}
@@ -282,6 +282,9 @@
         <div class="pill active" onclick="setScenarioView('utilisation')">📈 Utilisation</div>
         <div class="pill" onclick="setScenarioView('gantt')">📊 Gantt</div>
       </div>
+      <select id="scenario-week-from" onchange="renderScenario();saveState()"></select>
+      <select id="scenario-week-to" onchange="renderScenario();saveState()"></select>
+      <input type="date" id="scenario-date-picker" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:8px;font-size:13px;font-family:'Syne',sans-serif;cursor:pointer;outline:none" title="Jump to week" onchange="jumpToWeek('scenario-week-from','scenario-week-to',this.value);renderScenario();saveState()">
     </div>
   </div>
   <div class="scenario-layout">
@@ -650,6 +653,11 @@ function populateSelects() {
   document.getElementById('week-range-to').value   = ALL_WEEKS[ALL_WEEKS.length-1];
   document.getElementById('eng-week-from').value   = ALL_WEEKS[0];
   document.getElementById('eng-week-to').value     = ALL_WEEKS[ALL_WEEKS.length-1];
+  // Scenario week selectors
+  const swf = document.getElementById('scenario-week-from');
+  const swt = document.getElementById('scenario-week-to');
+  if (swf) { swf.innerHTML = wOpts; swf.value = ALL_WEEKS[0]; }
+  if (swt) { swt.innerHTML = wOpts; swt.value = ALL_WEEKS[ALL_WEEKS.length-1]; }
 }
 
 // ── Page navigation ───────────────────────────────────────────────────────────
@@ -799,7 +807,7 @@ function renderHeatmap(){
     h+=`<tr><td class="hm-team">${t}</td>`;
     for(const w of weeks){
       const d=data[t][w]; const p=d.avail>0?d.util/d.avail*100:0;
-      h+=`<td class="heatmap-cell ${hmClass(p)}" title="${t} · ${w}: ${p.toFixed(1)}%">${p>0?p.toFixed(0)+'%':'—'}</td>`;
+      h+=`<td style="padding:2px"><div class="heatmap-cell ${hmClass(p)}" title="${t} · ${w}: ${p.toFixed(1)}%">${p>0?p.toFixed(0)+'%':'—'}</div></td>`;
     }
     h+='</tr>';
   }
@@ -872,7 +880,10 @@ function addPhase(){
       <div><div class="form-label">Unit</div><select class="form-input" id="pu-${id}" style="cursor:pointer"><option value="weeks">Weeks</option><option value="days">Days</option></select></div>
       <div><div class="form-label">Start offset (wks)</div><input class="form-input" id="po-${id}" type="number" min="0" value="0" placeholder="0=project start"></div>
     </div>
-    <div><div class="form-label">Or start same time as phase</div><select class="form-input" id="pw-${id}" style="cursor:pointer"><option value="">— none —</option></select></div>`;
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><div class="form-label">Start same time as</div><select class="form-input" id="pw-${id}" style="cursor:pointer"><option value="">— none —</option></select></div>
+      <div><div class="form-label">Start after phase ends</div><select class="form-input" id="pa-${id}" style="cursor:pointer"><option value="">— none —</option></select></div>
+    </div>`;
   document.getElementById('phase-list').appendChild(div);
   refreshWithOptions();
   renumberPhases();
@@ -894,10 +905,16 @@ function refreshWithOptions(){
   const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
   phases.forEach(phaseEl=>{
     const id=phaseEl.id.replace('phase-','');
-    const sel=document.getElementById(`pw-${id}`);
-    if(!sel)return;
+    const selW=document.getElementById(`pw-${id}`);
+    const selA=document.getElementById(`pa-${id}`);
     const others=phases.filter(p=>p.id!==`phase-${id}`);
-    sel.innerHTML='<option value="">— none —</option>'+others.map(p=>{const pid=p.id.replace('phase-','');const t=document.getElementById(`pt-${pid}`)?.value||`Phase ${pid}`;return`<option value="${pid}">Phase ${pid} (${t})</option>`;}).join('');
+    const opts='<option value="">— none —</option>'+others.map(p=>{
+      const pid=p.id.replace('phase-','');
+      const t=document.getElementById(`pt-${pid}`)?.value||`Phase ${pid}`;
+      return`<option value="${pid}">Phase ${pid} (${t})</option>`;
+    }).join('');
+    if(selW) selW.innerHTML=opts;
+    if(selA) selA.innerHTML=opts;
   });
 }
 function addProject(){
@@ -908,13 +925,34 @@ function addProject(){
   if(!phaseEls.length){alert('Add at least one team phase');return;}
   const projectStartMs=new Date(startDate).getTime();
   const pStarts={};
+  // First pass: collect direct offsets and references
   phaseEls.forEach(el=>{
     const id=el.id.replace('phase-','');
-    const withId=document.getElementById(`pw-${id}`)?.value;
-    const offset=parseFloat(document.getElementById(`po-${id}`)?.value||0);
-    pStarts[id]=withId?{waitFor:withId}:{ms:projectStartMs+offset*7*24*3600*1000};
+    const withId  = document.getElementById(`pw-${id}`)?.value; // same time as
+    const afterId = document.getElementById(`pa-${id}`)?.value; // start after ends
+    const offset  = parseFloat(document.getElementById(`po-${id}`)?.value||0);
+    if (withId)  pStarts[id]={waitFor:withId,  type:'same'};
+    else if (afterId) pStarts[id]={waitFor:afterId, type:'after'};
+    else pStarts[id]={ms:projectStartMs+offset*7*24*3600*1000};
   });
-  Object.entries(pStarts).forEach(([id,p])=>{if(p.waitFor)pStarts[id].ms=pStarts[p.waitFor]?.ms||projectStartMs;});
+  // Second pass: resolve references (may need multiple passes for chains)
+  for (let pass=0; pass<5; pass++) {
+    Object.entries(pStarts).forEach(([id,p])=>{
+      if (!p.waitFor) return;
+      const ref = pStarts[p.waitFor];
+      if (!ref || ref.ms === undefined) return; // not resolved yet
+      if (p.type === 'same') {
+        pStarts[id] = { ms: ref.ms };
+      } else if (p.type === 'after') {
+        // Find the duration of the referenced phase to get its end
+        const refEl = document.getElementById(`pd-${p.waitFor}`);
+        const refUnit = document.getElementById(`pu-${p.waitFor}`)?.value || 'weeks';
+        const refDur = parseFloat(refEl?.value || 4);
+        const refWeeks = refUnit === 'days' ? refDur / 5 : refDur;
+        pStarts[id] = { ms: ref.ms + Math.ceil(refWeeks) * 7 * 24 * 3600 * 1000 };
+      }
+    });
+  }
   const phases=[];
   phaseEls.forEach(el=>{
     const id=el.id.replace('phase-','');
@@ -936,6 +974,47 @@ function addProject(){
   renderScenario();
   saveState();
 }
+
+function editProject(id) {
+  const proj = forecastProjects.find(p => p.id === id);
+  if (!proj) return;
+  // Pre-fill the form with existing project data
+  document.getElementById('proj-name').value      = proj.name;
+  document.getElementById('proj-start-date').value = proj.startDate;
+  document.getElementById('proj-end-date').value   = proj.endDate || '';
+  // Clear existing phases
+  document.getElementById('phase-list').innerHTML = '';
+  phaseCounter = 0;
+  // Remove the project from the list (will be re-added on submit)
+  forecastProjects = forecastProjects.filter(p => p.id !== id);
+  renderProjectList();
+  // Rebuild phases in the form
+  proj.phases.forEach(ph => {
+    addPhase();
+    const pid = phaseCounter;
+    const teamSel = document.getElementById(`pt-${pid}`);
+    const hoursFld = document.getElementById(`ph-${pid}`);
+    const durFld   = document.getElementById(`pd-${pid}`);
+    const unitSel  = document.getElementById(`pu-${pid}`);
+    const offFld   = document.getElementById(`po-${pid}`);
+    if (teamSel)  teamSel.value  = ph.team;
+    if (hoursFld) hoursFld.value = ph.hours;
+    if (durFld)   durFld.value   = ph.durWeeks || Math.ceil(ph.weeksSpan?.length || 4);
+    if (unitSel)  unitSel.value  = 'weeks';
+    if (offFld) {
+      // Calculate offset in weeks from project start
+      const projMs = new Date(proj.startDate).getTime();
+      const phMs   = ph.startMs || projMs;
+      const diffWeeks = Math.round((phMs - projMs) / (7*24*3600*1000));
+      offFld.value = diffWeeks;
+    }
+  });
+  // Scroll to form
+  document.getElementById('proj-name').scrollIntoView({ behavior: 'smooth' });
+  document.getElementById('proj-name').focus();
+  saveState();
+}
+
 function removeProject(id){forecastProjects=forecastProjects.filter(p=>p.id!==id);renderProjectList();renderScenario();saveState();}
 function clearProjects(){forecastProjects=[];renderProjectList();renderScenario();saveState();}
 function renderProjectList(){
@@ -943,7 +1022,7 @@ function renderProjectList(){
   const cw=document.getElementById('clear-btn-wrap');
   if(!forecastProjects.length){el.innerHTML='<div class="empty" style="padding:24px">No projects yet.</div>';if(cw)cw.style.display='none';return;}
   if(cw)cw.style.display='block';
-  el.innerHTML=forecastProjects.map(p=>`<div class="project-chip"><div><div class="project-chip-name">${p.name}</div><div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s)</div></div><button class="chip-remove" onclick="removeProject(${p.id})">×</button></div>`).join('');
+  el.innerHTML=forecastProjects.map(p=>`<div class="project-chip"><div style="flex:1"><div class="project-chip-name">${p.name}</div><div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s): ${p.phases.map(ph=>ph.team).join(', ')}</div></div><div style="display:flex;gap:6px;align-items:center"><button onclick="editProject(${p.id})" style="background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;padding:3px 8px;border-radius:6px;font-size:11px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">✏️</button><button class="chip-remove" onclick="removeProject(${p.id})">×</button></div></div>`).join('');
 }
 function applyAddPerson(){
   const team=document.getElementById('addperson-team').value;
@@ -982,7 +1061,13 @@ function renderGantt(){
 
 function renderScenario(){
   const ft=getFilteredTeams();
-  const weeks=ALL_WEEKS;
+  // Use scenario week filter if selectors exist
+  const swf = document.getElementById('scenario-week-from')?.value;
+  const swt = document.getElementById('scenario-week-to')?.value;
+  const fi = swf ? ALL_WEEKS.indexOf(swf) : 0;
+  const ti = swt ? ALL_WEEKS.indexOf(swt) : ALL_WEEKS.length-1;
+  const weeks = ALL_WEEKS.slice(Math.min(fi<0?0:fi, ti<0?ALL_WEEKS.length-1:ti),
+                                Math.max(fi<0?0:fi, ti<0?ALL_WEEKS.length-1:ti)+1);
   const baseline={};
   for(const t of ALL_TEAMS){baseline[t]={};for(const w of weeks)baseline[t][w]={avail:0,util:0};}
   for(const r of ft){if(baseline[r.team]?.[r.week]!==undefined){baseline[r.team][r.week].avail+=r.available_hours;baseline[r.team][r.week].util+=r.utilized_hours;}}
@@ -1185,6 +1270,8 @@ function saveState() {
       engWeekTo:        document.getElementById('eng-week-to')?.value,
       heatmap:          document.getElementById('heatmap-filter')?.value,
       scenarioTeam:     document.getElementById('scenario-team-select')?.value,
+      scenarioWeekFrom: document.getElementById('scenario-week-from')?.value,
+      scenarioWeekTo:   document.getElementById('scenario-week-to')?.value,
       viewMode:         viewMode,
       settings:         SETTINGS,
       forecastProjects:        forecastProjects,
@@ -1253,6 +1340,8 @@ function restoreState() {
     setDrop('eng-week-to',          s.engWeekTo);
     setDrop('heatmap-filter',       s.heatmap);
     setDrop('scenario-team-select', s.scenarioTeam);
+    setDrop('scenario-week-from',   s.scenarioWeekFrom);
+    setDrop('scenario-week-to',     s.scenarioWeekTo);
 
     // 5. Switch to saved tab (without triggering saveState)
     if (s.pageId) {
