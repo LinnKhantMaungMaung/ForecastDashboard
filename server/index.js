@@ -20,7 +20,7 @@ const path    = require('path');
 const fetch   = require('node-fetch');
 
 const { fetchReportRange, fetchResources, fetchResourceTypes, BASE } = require('./resourceGuru');
-const { buildRawData } = require('./transformer');
+const { buildRawData, buildBookingsData } = require('./transformer');
 
 const app      = express();
 const PORT     = process.env.PORT || 3000;
@@ -33,6 +33,9 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ── In-memory cache ───────────────────────────────────────────────────────────
 let cache = { data: null, fetchedAt: null, expiresAt: null, building: false };
 const isCacheValid = () => cache.data && cache.expiresAt && new Date() < cache.expiresAt;
+
+// Bookings cache — rebuilt alongside utilisation, uses same date range
+let bookingsCache = { data: null, building: false };
 
 // Custom date range — set by API call, defaults to current year Apr-Oct
 let customDateRange = null;
@@ -52,7 +55,14 @@ async function refreshCache() {
     cache.data      = raw;
     cache.fetchedAt = new Date();
     cache.expiresAt = new Date(Date.now() + CACHE_TTL);
-    console.log(`[Cache] Ready — ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
+    console.log(`[Cache] Utilisation ready — ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
+    // Build bookings data alongside — non-blocking so dashboard loads immediately
+    buildBookingsData(from, to)
+      .then(bd => {
+        bookingsCache.data = bd;
+        console.log(`[Bookings Cache] Ready — ${bd.weeks.length} weeks`);
+      })
+      .catch(err => console.error('[Bookings Cache] Build failed:', err.message));
     return raw;
   } finally {
     cache.building = false;
@@ -118,6 +128,34 @@ app.get('/api/reset-range', async (req, res) => {
   customDateRange = null;
   await refreshCache();
   res.json({ ok: true, range: getDateRange(), weeks: cache.data?.meta?.weeks });
+});
+
+// ── Bookings route (live from Resource Guru) ─────────────────────────────────
+app.get('/api/bookings', async (req, res) => {
+  try {
+    // If empty and not building, kick off an on-demand build
+    if (!bookingsCache.data && !bookingsCache.building) {
+      bookingsCache.building = true;
+      const { from, to } = getDateRange();
+      console.log(`[Bookings] On-demand build ${from} → ${to}`);
+      try {
+        bookingsCache.data = await buildBookingsData(from, to);
+        console.log(`[Bookings] Built ${bookingsCache.data.weeks.length} weeks`);
+      } finally {
+        bookingsCache.building = false;
+      }
+    }
+    if (bookingsCache.building && !bookingsCache.data) {
+      return res.status(503).json({
+        error: 'Bookings data is still building. Retry in ~60 seconds.',
+        building: true,
+      });
+    }
+    res.json(bookingsCache.data);
+  } catch(err) {
+    console.error('[/api/bookings]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Debug routes ──────────────────────────────────────────────────────────────
