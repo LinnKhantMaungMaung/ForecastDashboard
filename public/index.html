@@ -1130,15 +1130,11 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
       c.restore();
     }
   };
-  // Highlight already-selected dataset (restores across re-renders)
-  if (!isBar && savedHighlight) {
+  // Restore hidden datasets from savedHighlight (array of hidden labels)
+  if (!isBar && Array.isArray(savedHighlight)) {
     datasets = datasets.map(ds => ({
       ...ds,
-      borderWidth: ds.label === savedHighlight ? 3 : 1,
-      borderColor: ds.label === savedHighlight
-        ? ds.borderColor
-        : (ds.borderColor || '#fff').replace(')', ',0.3)').replace('rgb(','rgba('),
-      pointRadius: ds.label === savedHighlight ? 5 : 2,
+      hidden: savedHighlight.includes(ds.label),
     }));
   }
   const chart = new Chart(ctx,{
@@ -1148,54 +1144,26 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
       plugins:{legend:{
         labels:{color:'#e8eaf0',font:{family:'Syne',size:11},boxWidth:12},
         onClick(e, legendItem, legend) {
-          const label = legendItem.text;
-          const chart = legend.chart;
-          if (savedHighlight === label) {
-            // Second click — clear highlight
-            savedHighlight = null;
-            chart.data.datasets.forEach(ds => {
-              ds.borderWidth = 2;
-              ds.pointRadius = 3;
-              // Restore original color (remove opacity)
-              if (ds._origColor) { ds.borderColor = ds._origColor; delete ds._origColor; }
-            });
+          // Default Chart.js toggle behaviour: hide/show dataset, strikethrough in legend
+          const idx = legendItem.datasetIndex;
+          const meta = legend.chart.getDatasetMeta(idx);
+          meta.hidden = !meta.hidden;
+          // Persist hidden state
+          if (!Array.isArray(savedHighlight)) savedHighlight = [];
+          const label = legend.chart.data.datasets[idx].label;
+          if (meta.hidden) {
+            if (!savedHighlight.includes(label)) savedHighlight.push(label);
           } else {
-            savedHighlight = label;
-            chart.data.datasets.forEach(ds => {
-              if (!ds._origColor) ds._origColor = ds.borderColor;
-              if (ds.label === label) {
-                ds.borderWidth = 3;
-                ds.pointRadius = 5;
-                ds.borderColor = ds._origColor || ds.borderColor;
-              } else {
-                ds.borderWidth = 1;
-                ds.pointRadius = 2;
-                const c = ds._origColor || ds.borderColor || '#888';
-                ds.borderColor = c.startsWith('#')
-                  ? c + '44'
-                  : c.replace(/,[\s\d.]+\)$/, ',0.2)');
-              }
-            });
+            savedHighlight = savedHighlight.filter(l => l !== label);
           }
-          chart.update();
+          if (savedHighlight.length === 0) savedHighlight = null;
+          legend.chart.update();
           saveState();
         }
       },tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}`}}},
       scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,max:isBar?100:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},
     plugins:[redZonePlugin]
   });
-  // Click on chart area to highlight a line
-  if (!isBar) {
-    ctx.canvas.onclick = (evt) => {
-      const points = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},false);
-      if (points.length) {
-        const dsIndex = points[0].datasetIndex;
-        const label   = chart.data.datasets[dsIndex].label;
-        // Simulate legend click behaviour
-        Chart.defaults.plugins.legend.onClick.call({chart}, evt, {text:label}, {chart});
-      }
-    };
-  }
   setter(chart);
 }
 
