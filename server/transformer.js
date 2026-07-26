@@ -57,9 +57,7 @@ function getTeamFromJobTitle(jt) {
 
 function getSeniority(job_title) {
   const jt = job_title || '';
-  // Director: any title containing 'director', 'chief', or common director variants
   if (/\bdirector\b|\bchief\b|group managing/i.test(jt)) return 'director';
-  // Manager/Head: any title with 'manager', 'head of', or 'head of X' pattern
   if (/\bmanager\b|\bhead of\b/i.test(jt)) return 'manager';
   return 'staff';
 }
@@ -178,20 +176,24 @@ async function buildRawData(from, to) {
       // Use primary (first) department for engineer list and weekly rows
       const primaryTeam = departments[0];
 
-      // Engineer list — only set on first encounter, or update if we have better data
-      // This prevents a later week with empty job_title overwriting a good seniority value
+      // Engineer list — store all departments as array
+      // Only update engineerList if this week has better data than what we already have.
+      // Critical: never overwrite a known director/manager seniority with 'staff'
+      // (happens when report returns empty job_title in later weeks)
       const existing = engineerList[name];
+      const bestSeniority = (existing?.seniority && existing.seniority !== 'staff')
+        ? existing.seniority   // keep director/manager once identified
+        : seniority;           // accept new value if existing is staff or unknown
+      const bestJobTitle = resolvedJobTitle || existing?.job_title || '';
+
       engineerList[name] = {
         name,
         team:         primaryTeam,
         departments,
-        job_title:    resolvedJobTitle || existing?.job_title || '',
+        job_title:    bestJobTitle,
         isContractor,
         resourceType: rtName,
-        // Keep best seniority: prefer non-staff over staff (in case last week had empty job_title)
-        seniority: (existing?.seniority && existing.seniority !== 'staff')
-          ? existing.seniority
-          : seniority,
+        seniority:    bestSeniority,
       };
 
       // Engineer weekly row (primary team only for chart simplicity)
