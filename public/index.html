@@ -577,16 +577,35 @@ function applySettings() {
 }
 
 // ── Filtered data helpers ─────────────────────────────────────────────────────
+// Compute seniority from job title — mirrors server-side getSeniority()
+function computeSeniority(jobTitle) {
+  const jt = jobTitle || '';
+  if (/\bdirector\b|\bchief\b|group managing/i.test(jt)) return 'director';
+  if (/\bmanager\b|\bhead of\b/i.test(jt)) return 'manager';
+  return 'staff';
+}
+
+// Return the higher-rank seniority between two values
+// director > manager > staff
+function bestSeniority(a, b) {
+  const rank = { director: 2, manager: 1, staff: 0 };
+  return (rank[a] || 0) >= (rank[b] || 0) ? a : b;
+}
+
 function getExcludedNames() {
   const ex = new Set();
   for (const e of RAW.engineer_list||[]) {
-    // Contractor override: treat as employee
     const isContractor = e.isContractor && !CONTRACTOR_OVERRIDES.has(e.name);
     if (!SETTINGS.employees && !isContractor) { ex.add(e.name); continue; }
     if (!SETTINGS.contractors && isContractor) { ex.add(e.name); continue; }
-    if (!SETTINGS.directors && e.seniority?.toLowerCase()==='director') { ex.add(e.name); continue; }
-    if (!SETTINGS.managers && e.seniority?.toLowerCase()==='manager') { ex.add(e.name); continue; }
-    if (!SETTINGS.staff && e.seniority?.toLowerCase()==='staff') { ex.add(e.name); continue; }
+    // Always compute from job_title AND take the higher of the two.
+    // This handles stale cache where seniority='staff' but job title says 'Manager'.
+    const fromCache    = e.seniority?.toLowerCase() || 'staff';
+    const fromJobTitle = computeSeniority(e.job_title);
+    const seniority    = bestSeniority(fromCache, fromJobTitle);
+    if (!SETTINGS.directors && seniority === 'director') { ex.add(e.name); continue; }
+    if (!SETTINGS.managers  && seniority === 'manager')  { ex.add(e.name); continue; }
+    if (!SETTINGS.staff     && seniority === 'staff')    { ex.add(e.name); continue; }
     // People visibility filter
     if (HIDDEN_PEOPLE.has(e.name)) { ex.add(e.name); continue; }
   }
