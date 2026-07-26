@@ -57,8 +57,10 @@ function getTeamFromJobTitle(jt) {
 
 function getSeniority(job_title) {
   const jt = job_title || '';
-  if (/director|managing director|executive director|chief|group managing/i.test(jt)) return 'director';
-  if (/\bmanager\b|head of/i.test(jt)) return 'manager';
+  // Director: any title containing 'director', 'chief', or common director variants
+  if (/\bdirector\b|\bchief\b|group managing/i.test(jt)) return 'director';
+  // Manager/Head: any title with 'manager', 'head of', or 'head of X' pattern
+  if (/\bmanager\b|\bhead of\b/i.test(jt)) return 'manager';
   return 'staff';
 }
 
@@ -176,15 +178,20 @@ async function buildRawData(from, to) {
       // Use primary (first) department for engineer list and weekly rows
       const primaryTeam = departments[0];
 
-      // Engineer list — store all departments as array
+      // Engineer list — only set on first encounter, or update if we have better data
+      // This prevents a later week with empty job_title overwriting a good seniority value
+      const existing = engineerList[name];
       engineerList[name] = {
         name,
         team:         primaryTeam,
-        departments,  // all departments this person belongs to
-        job_title:    resolvedJobTitle,
+        departments,
+        job_title:    resolvedJobTitle || existing?.job_title || '',
         isContractor,
         resourceType: rtName,
-        seniority,
+        // Keep best seniority: prefer non-staff over staff (in case last week had empty job_title)
+        seniority: (existing?.seniority && existing.seniority !== 'staff')
+          ? existing.seniority
+          : seniority,
       };
 
       // Engineer weekly row (primary team only for chart simplicity)
