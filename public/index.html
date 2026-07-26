@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Resource Utilisation Dashboard</title>
+<title>MotionTech | Resource Dashboard</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADC0lEQVR4nO3UO4tcdRyH8ef3v5wzt53Z+85uWCEa3EhQJCEgCzGksLAQUcRKUILYWdpZiZ2WARuxtjAplIgKXkCxiqiIAQUXQ0x2s7eZM5czc875XyyCb0EE5/MOvsXzhZmZmZmZ/zs5s/1aLKuSbDih3WrSbjXRWuG8I8tGxAjtuYQQAdGAgAhCJHiPIIgoRAkxRkKMREBEiMFDBK00oiB4jwsBRKGUwrkKE0Jgkpe89MIlmo061lre++BT3nj9OfYP+vgQufrxZ6RpC200aWqoqkBnrk6rmVKUgRgjvf4IJQojECNUziFR0FahxeCDw1iDLzzeB2qpxbsKo5Ti7Tdf4Ylzp8kGY9a7Szx86gQXtx9l589dVpfn2dzocOX968y1avhQkU8mCJFef4gxlhBABCAyLUpCiCwvthkMx0wmJbUUqqpCKcVGd4mVpXl+/nUHABNj5IuvfmB9bYGicGTDnA+vfsOJ7iL7B3362Yivv7uJiKaqCtLE4p3n3OOnWF9b4M7uMYNBziNbm9y6vc84L9BKOHP6AQ6PMnZu3WOju4zWcPO32zz/zDbFtGJ9bYFr179Fts6/HIejnM3NdbqriyTWcuPH37l04TEOjjJ6vRF/3d2n2aiRJAlKCb3+iKefOk93deH+CqPpZ2PqtYRaaullI/rZiIdOblBVjqPjIc47rLGMxhOuffI97771Ku9c+Qg5e/FylDjl5INbtFpNxnnB2soCzlVMpgW7exl79+6ilCKtzUEMjPOC+U6Toigx1pBag/MerTXOOfK8oNmso0TwIZBay2CcM9+Z48VnLxCBn375g8+/vIGcffJyjHFC6Zu0Gg201iRpwrSYMp0WOBfRkiMqIcQEkYD3EWsNSglV5RABYwxV5bHWokSIEYqyIMaAEkEbTVF6VpbaaKW4s3eMVoL5p0etFdkgJ0kSUhcYTyaURUGtlsD9sPDeIxLptBukaUJVOmItIbGaEIXDwwFVdGijCCESQiCEgAfKylGv1zk8GuBDoNmoMZ2W/+rnzMzMzMz8N/0N6XZ2uD7Gp+AAAAAASUVORK5CYII=">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -312,6 +313,11 @@
         <button class="btn" style="background:var(--surface2);border:1px solid var(--border);color:var(--accent);margin-bottom:12px" onclick="addPhase()">+ Add Team Phase</button>
         <div style="border-top:1px solid var(--border);padding-top:12px"></div>
         <button class="btn btn-primary" onclick="addProject()">Add to Scenario</button>
+        <button class="btn" style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:100%;display:flex;align-items:center;justify-content:center;gap:6px" onclick="document.getElementById('import-project-file').click()">
+          📂 Import from File
+        </button>
+        <input type="file" id="import-project-file" accept=".json,.xlsx,.xls,.csv,.txt" style="display:none" onchange="importProjectFile(this)">
+        <div id="import-status" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'DM Mono',monospace;display:none"></div>
       </div>
       <!-- Project list -->
       <div class="project-list" id="project-list" style="margin-top:12px">
@@ -924,6 +930,213 @@ function refreshWithOptions(){
     if(selA) selA.innerHTML=opts;
   });
 }
+// ── Import project from file ─────────────────────────────────────────────────
+// Accepts JSON (exported scenario), CSV, or plain text with project details
+// Uses Claude AI to parse unstructured files (Excel/text specs)
+async function importProjectFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // reset so same file can be re-imported
+
+  const statusEl = document.getElementById('import-status');
+  statusEl.style.display = 'block';
+  statusEl.style.color   = 'var(--muted)';
+  statusEl.textContent   = 'Reading file...';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  try {
+    // ── JSON: direct import (our own export format) ──────────────────────
+    if (ext === 'json') {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      // Accept either a single project object or an array
+      const projects = Array.isArray(data) ? data : [data];
+      let imported = 0;
+      projects.forEach(p => {
+        if (p.name && Array.isArray(p.phases)) {
+          forecastProjects.push({
+            id: Date.now() + imported,
+            name: p.name,
+            startDate: p.startDate || new Date().toISOString().slice(0,10),
+            endDate: p.endDate || '',
+            phases: p.phases,
+          });
+          imported++;
+        }
+      });
+      if (imported > 0) {
+        statusEl.style.color = 'var(--green)';
+        statusEl.textContent = `✓ Imported ${imported} project(s) from JSON`;
+        renderProjectList(); renderScenario(); saveState();
+      } else {
+        statusEl.style.color = 'var(--red)';
+        statusEl.textContent = '✗ No valid projects found in JSON file';
+      }
+      return;
+    }
+
+    // ── CSV: parse columns for project name, team, start, duration ───────
+    if (ext === 'csv') {
+      const text = await file.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g,''));
+      const findCol = (...names) => headers.findIndex(h => names.some(n => h.includes(n)));
+
+      const nameCol  = findCol('project','name','title');
+      const teamCol  = findCol('team','dept','department','resource');
+      const startCol = findCol('start','begin','from');
+      const durCol   = findCol('duration','weeks','days','length');
+      const hrCol    = findCol('hour','hrs','h/w','per week');
+
+      if (nameCol < 0) {
+        // No recognised columns — send to AI for parsing
+        await importWithAI(text, file.name);
+        return;
+      }
+
+      const projects = {};
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim().replace(/"/g,''));
+        const name  = cols[nameCol] || 'Imported Project';
+        const team  = teamCol  >= 0 ? (cols[teamCol]  || ALL_TEAMS[0]) : ALL_TEAMS[0];
+        const start = startCol >= 0 ? (cols[startCol] || new Date().toISOString().slice(0,10)) : new Date().toISOString().slice(0,10);
+        const dur   = durCol   >= 0 ? parseFloat(cols[durCol]  || 4) : 4;
+        const hrs   = hrCol    >= 0 ? parseFloat(cols[hrCol]   || 40) : 40;
+
+        if (!projects[name]) {
+          projects[name] = { id: Date.now() + i, name, startDate: start, phases: [] };
+        }
+        // Build weeks span
+        const weeksSpan = [];
+        let cur = new Date(start);
+        for (let w = 0; w < Math.ceil(dur); w++) {
+          weeksSpan.push(toWeekLabel(cur)); cur.setDate(cur.getDate() + 7);
+        }
+        projects[name].phases.push({
+          id: String(i), team,
+          hours: hrs, durWeeks: dur,
+          weeksSpan,
+          startMs: new Date(start).getTime(),
+        });
+      }
+
+      const list = Object.values(projects);
+      list.forEach(p => forecastProjects.push(p));
+      statusEl.style.color = 'var(--green)';
+      statusEl.textContent = `✓ Imported ${list.length} project(s) from CSV`;
+      renderProjectList(); renderScenario(); saveState();
+      return;
+    }
+
+    // ── Text/Excel/Unknown: send to Claude AI for intelligent parsing ─────
+    const text = await file.text();
+    await importWithAI(text, file.name);
+
+  } catch(err) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ Import failed: ' + err.message;
+    console.error('[Import]', err);
+  }
+}
+
+// Send file content to Claude to extract project/phase info
+async function importWithAI(fileContent, fileName) {
+  const statusEl = document.getElementById('import-status');
+  statusEl.style.color = 'var(--muted)';
+  statusEl.textContent = '🤖 Asking AI to parse file...';
+
+  const availableTeams = ALL_TEAMS.join(', ');
+  const today = new Date().toISOString().slice(0,10);
+
+  const prompt = `You are parsing a project specification file for a Resource Guru utilisation dashboard scenario planner.
+
+File name: ${fileName}
+Available teams/departments: ${availableTeams}
+Today's date: ${today}
+
+File content:
+${fileContent.slice(0, 3000)}
+
+Extract ALL projects from this file and return ONLY a JSON array (no explanation, no markdown, no code blocks) in this exact format:
+[
+  {
+    "name": "Project Name",
+    "startDate": "YYYY-MM-DD",
+    "phases": [
+      {
+        "id": "1",
+        "team": "team name matching one of the available teams above",
+        "hours": 40,
+        "durWeeks": 4,
+        "weeksSpan": [],
+        "startMs": 0
+      }
+    ]
+  }
+]
+
+Rules:
+- Match team names exactly to the available teams list above
+- If a team is not in the list, use the closest match
+- hours = hours per week per person for that phase (default 40 if not specified)
+- durWeeks = duration in weeks (convert days to weeks if needed, 5 working days = 1 week)
+- Leave weeksSpan as [] and startMs as 0 — they will be calculated
+- If start date is not specified, use today's date: ${today}
+- Return ONLY the JSON array, nothing else`;
+
+  try {
+    const resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+    });
+
+    if (!resp.ok) throw new Error('AI request failed: ' + resp.status);
+    const data = await resp.json();
+    const raw  = data.content?.[0]?.text || '';
+
+    // Parse JSON from response
+    let projects;
+    try {
+      const clean = raw.replace(/```json|```/g, '').trim();
+      projects = JSON.parse(clean);
+    } catch(e) {
+      throw new Error('AI returned unparseable response: ' + raw.slice(0,100));
+    }
+
+    if (!Array.isArray(projects) || projects.length === 0) {
+      throw new Error('AI found no projects in the file');
+    }
+
+    // Calculate weeksSpan and startMs for each phase
+    projects.forEach(proj => {
+      proj.id = Date.now() + Math.random();
+      proj.phases.forEach((ph, i) => {
+        ph.id = String(i + 1);
+        const startMs = new Date(proj.startDate).getTime();
+        ph.startMs = startMs;
+        const weeksSpan = [];
+        let cur = new Date(startMs);
+        for (let w = 0; w < Math.ceil(ph.durWeeks || 4); w++) {
+          weeksSpan.push(toWeekLabel(cur));
+          cur.setDate(cur.getDate() + 7);
+        }
+        ph.weeksSpan = weeksSpan;
+      });
+      forecastProjects.push(proj);
+    });
+
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = `✓ AI imported ${projects.length} project(s) from ${fileName}`;
+    renderProjectList(); renderScenario(); saveState();
+
+  } catch(err) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ AI parse failed: ' + err.message;
+  }
+}
+
 function addProject(){
   const name=document.getElementById('proj-name').value.trim();
   const startDate=document.getElementById('proj-start-date').value;
@@ -1158,6 +1371,8 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
           }
           if (savedHighlight.length === 0) savedHighlight = null;
           legend.chart.update();
+          // Sync: hiding a chart line also hides it in the dept dropdown
+          syncDeptSettingsFromChart(label, !meta.hidden);
           saveState();
         }
       },tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}`}}},
@@ -1398,7 +1613,27 @@ function filterPeopleList(){ buildPeopleList(document.getElementById('people-sea
 function filterContractorList(){ buildContractorList(document.getElementById('contractor-search')?.value||''); }
 
 function toggleDept(dept, visible) {
-  if (visible) HIDDEN_DEPTS.delete(dept); else HIDDEN_DEPTS.add(dept);
+  if (visible) {
+    HIDDEN_DEPTS.delete(dept);
+    // Re-show people who ONLY belong to this dept (don't re-show if still in another hidden dept)
+    (RAW.engineer_list||[]).forEach(e => {
+      const depts = e.departments && e.departments.length > 0 ? e.departments : [e.team];
+      if (depts.includes(dept)) {
+        const stillHiddenByOtherDept = depts.some(d => d !== dept && HIDDEN_DEPTS.has(d));
+        if (!stillHiddenByOtherDept) HIDDEN_PEOPLE.delete(e.name);
+      }
+    });
+  } else {
+    HIDDEN_DEPTS.add(dept);
+    // Auto-hide all people whose PRIMARY dept is this one
+    (RAW.engineer_list||[]).forEach(e => {
+      const depts = e.departments && e.departments.length > 0 ? e.departments : [e.team];
+      if (depts.includes(dept)) HIDDEN_PEOPLE.add(e.name);
+    });
+  }
+  buildPeopleList(document.getElementById('people-search')?.value||'');
+  // Sync chart legend: hide/show the team line
+  syncChartLegendForDept(dept, visible);
   applyFilters();
 }
 function togglePerson(name, visible) {
@@ -1422,6 +1657,48 @@ function setAllPeople(visible) {
   buildPeopleList(document.getElementById('people-search')?.value||'');
   applyFilters();
 }
+// ── Sync helpers ─────────────────────────────────────────────────────────────
+// Called when chart legend hides a team → update dept checkbox in settings
+function syncDeptSettingsFromChart(teamLabel, visible) {
+  if (visible) HIDDEN_DEPTS.delete(teamLabel);
+  else HIDDEN_DEPTS.add(teamLabel);
+  // Also cascade to people
+  (RAW.engineer_list||[]).forEach(e => {
+    const depts = e.departments && e.departments.length > 0 ? e.departments : [e.team];
+    if (depts.includes(teamLabel)) {
+      if (!visible) {
+        HIDDEN_PEOPLE.add(e.name);
+      } else {
+        const stillHidden = depts.some(d => d !== teamLabel && HIDDEN_DEPTS.has(d));
+        if (!stillHidden) HIDDEN_PEOPLE.delete(e.name);
+      }
+    }
+  });
+  // Refresh settings panel lists if open
+  buildDeptList(document.getElementById('dept-search')?.value||'');
+  buildPeopleList(document.getElementById('people-search')?.value||'');
+}
+
+// Called when dept checkbox changes → update chart legend visibility
+function syncChartLegendForDept(teamLabel, visible) {
+  if (!mainChart) return;
+  const ds = mainChart.data.datasets;
+  if (!Array.isArray(savedHighlight)) savedHighlight = [];
+  ds.forEach((d, i) => {
+    if (d.label === teamLabel) {
+      const meta = mainChart.getDatasetMeta(i);
+      meta.hidden = !visible;
+      if (!visible) {
+        if (!savedHighlight.includes(d.label)) savedHighlight.push(d.label);
+      } else {
+        savedHighlight = savedHighlight.filter(l => l !== d.label);
+      }
+    }
+  });
+  if (savedHighlight.length === 0) savedHighlight = null;
+  mainChart.update();
+}
+
 function applyFilters() {
   saveState();
   renderUtilisation(); renderHeatmap();
