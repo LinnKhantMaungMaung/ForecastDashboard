@@ -376,7 +376,13 @@ app.post('/api/parse-mpp', require('express').raw({ type: 'application/octet-str
     }
   });
 });
-
+app.get('/api/debug-env', (req, res) => {
+  const { execFile } = require('child_process');
+  execFile('sh', ['-c', 'which python3; python3 -V; which java; java -version 2>&1; python3 -c "import jpype, olefile, mpxj; print(\'py deps OK\')"'],
+    { timeout: 15000 },
+    (err, stdout, stderr) => res.type('text').send((stdout || '') + '\n---\n' + (stderr || '') + '\n---\nerr: ' + (err ? err.message : 'none'))
+  );
+});
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
   console.log(`   RG account : ${process.env.RG_ACCOUNT || '(not set — check .env)'}`);
