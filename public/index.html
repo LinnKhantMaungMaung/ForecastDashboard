@@ -1007,90 +1007,94 @@ function processAiMppTasks(tasks, fileName, statusEl) {
   renderProjectList(); renderScenario(); saveState();
 }
 
+// Resource name → team mapping (no AI, pure lookup)
+function resourceToTeam(resourceName) {
+  const r = (resourceName || '').toLowerCase();
+  if (/panel shop|panel build/i.test(r))           return 'Control Panels - Notts';
+  if (/install team|electrical install/i.test(r))  return 'Electrical Installation';
+  if (/design eng/i.test(r))                       return 'Design';
+  if (/control systems? eng|plc eng/i.test(r))     return 'PLC';
+  if (/software|helix/i.test(r))                   return 'HELIX';
+  if (/robotics/i.test(r))                         return 'Robotics';
+  if (/project manager|site lead/i.test(r))        return 'Projects';
+  if (/service manager/i.test(r))                  return 'Service';
+  if (/procurement/i.test(r))                      return 'Projects';
+  return null;
+}
+
 // Convert parsed MPP data into scenario forecast projects — no AI required
 function processMppData(mppData, fileName, statusEl) {
   statusEl.style.color = 'var(--muted)';
-  statusEl.textContent = 'Mapping tasks to teams...';
+  statusEl.textContent = 'Building scenario phases...';
 
   const tasks  = mppData.tasks      || [];
   const rawStr = mppData.raw_strings || [];
 
-  // ── Structured XML data (best case) ──────────────────────────────────────
+  // ── MPXJ structured data ──────────────────────────────────────────────────
   if (tasks.length > 0) {
-    const projects = {};
-    let currentProject = null;
+    // Use outline level 2 summary tasks as phases (direct children of project root)
+    const phases_src = tasks.filter(t =>
+      t.is_summary && t.outline_level === 2 &&
+      !/quoted leadtime|payment term/i.test(t.name)
+    );
 
-    // First pass: outline_level 1 = project header, 2+ = phases
-    for (const t of tasks) {
-      if (!t.name || t.name.trim() === '') continue;
-      if (t.outline_level <= 1 || t.is_summary) {
-        currentProject = {
-          id:        Date.now() + Math.random(),
-          name:      t.name,
-          startDate: t.start || new Date().toISOString().slice(0,10),
-          endDate:   t.finish || '',
-          phases:    [],
-          _tasks:    [],
-        };
-        projects[t.uid] = currentProject;
-      } else if (currentProject) {
-        currentProject._tasks.push(t);
-      }
-    }
+    // Fallback: if no level-2 summaries, use all summaries
+    const phaseTasks = phases_src.length > 0 ? phases_src
+      : tasks.filter(t => t.is_summary && !/quoted|payment/i.test(t.name));
 
-    // If no hierarchy — treat all tasks as phases of one project
-    const projectList = Object.values(projects);
-    if (projectList.length === 0 && tasks.length > 0) {
-      projectList.push({
-        id:        Date.now(),
-        name:      fileName.replace(/\.mpp$/i,''),
-        startDate: tasks[0].start || new Date().toISOString().slice(0,10),
-        phases:    [],
-        _tasks:    tasks,
-      });
-    }
+    // Get project start from first task
+    const firstTask   = tasks.find(t => t.start);
+    const projectStart = firstTask?.start || new Date().toISOString().slice(0,10);
 
-    let imported = 0;
-    for (const proj of projectList) {
-      const phaseTasks = proj._tasks.length > 0 ? proj._tasks : [];
+    const phases = phaseTasks.map((t, i) => {
+      // Team from resources assigned to sub-tasks under this phase
+      const subTasks = tasks.filter(st =>
+        !st.is_summary &&
+        st.outline_level === t.outline_level + 1 &&
+        st.id > t.id &&
+        (i + 1 >= phaseTasks.length || st.id < phaseTasks[i + 1].id)
+      );
 
-      const phases = phaseTasks.map((t, i) => {
-        // Match team from task name keywords — no AI needed
-        const team    = guessTeamFromTaskName(t.name);
-        const startMs = new Date(t.start || proj.startDate).getTime();
-        const weeksSpan = [];
-        let cur = new Date(startMs);
-        for (let w = 0; w < (t.dur_weeks || 1); w++) {
-          weeksSpan.push(toWeekLabel(cur));
-          cur.setDate(cur.getDate() + 7);
+      // Try to find team from sub-task resource names
+      let team = null;
+      for (const st of subTasks) {
+        for (const res of (st.resources || [])) {
+          team = resourceToTeam(res);
+          if (team) break;
         }
-        return { id: String(i+1), team, hours: 40, durWeeks: t.dur_weeks || 1, weeksSpan, startMs };
-      });
+        if (team) break;
+      }
+      // Fallback: guess from phase name
+      if (!team) team = guessTeamFromTaskName(t.name);
 
-      // If project has no sub-tasks, make it a single phase itself
-      if (phases.length === 0) {
-        const startMs = new Date(proj.startDate).getTime();
-        const weeksSpan = [];
-        let cur = new Date(startMs);
-        for (let w = 0; w < 4; w++) { weeksSpan.push(toWeekLabel(cur)); cur.setDate(cur.getDate()+7); }
-        phases.push({ id: '1', team: guessTeamFromTaskName(proj.name), hours: 40, durWeeks: 4, weeksSpan, startMs });
+      // Use real start date from MPP
+      const startDate = t.start || projectStart;
+      const startMs   = new Date(startDate).getTime();
+      const durWeeks  = Math.max(1, t.dur_weeks || 2);
+      const weeksSpan = [];
+      for (let w = 0; w < durWeeks; w++) {
+        weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
       }
 
-      delete proj._tasks;
-      proj.phases = phases;
-      forecastProjects.push(proj);
-      imported++;
-    }
+      return { id: String(i + 1), team, hours: 40, durWeeks, weeksSpan, startMs };
+    });
 
+    if (phases.length === 0) throw new Error('No phases found in MPP structure');
+
+    const projName = tasks[0]?.name || fileName.replace(/\.mpp$/i,'').replace(/[_-]+/g,' ').trim();
+    const proj = { id: Date.now(), name: projName, startDate: projectStart, phases };
+    forecastProjects.push(proj);
+
+    const totalTasks = tasks.filter(t => !t.is_summary).length;
     statusEl.style.color = 'var(--green)';
-    statusEl.textContent = '✓ Imported ' + imported + ' project(s) (' + tasks.length + ' tasks). Check team assignments and adjust if needed.';
+    statusEl.textContent = '\u2713 Imported ' + phases.length + ' phases, ' + totalTasks
+      + ' tasks from ' + fileName + ' (dates and durations from MPP).';
     renderProjectList(); renderScenario(); saveState();
     return;
   }
 
-  // ── Fallback: raw strings from binary MPP ───────────────────────────────
+  // ── Fallback: raw strings ─────────────────────────────────────────────────
   if (rawStr.length > 0) {
-    // Map known MotionTech MPP phase headers to teams
     const PHASE_MAP = [
       { re: /^Design.*Electrical/i,  team: 'Design',                 name: 'Design: Electrical' },
       { re: /^Design.*Software/i,    team: 'HELIX',                  name: 'Design: Software'   },
@@ -1104,32 +1108,24 @@ function processMppData(mppData, fileName, statusEl) {
       { re: /^Launch/i,              team: 'Projects',               name: 'Launch'             },
       { re: /^Handover$/i,           team: 'Projects',               name: 'Handover'           },
     ];
-
-    // Check which phases appear in this file's strings
-    const found = PHASE_MAP.filter(p => rawStr.some(s => p.re.test(s.replace(/:$/,'').trim())));
-
-    // If nothing matched, fall back to guessing from all strings
-    const phaseDefs = found.length > 0 ? found : PHASE_MAP;
-
-    const today = Date.now();
-    const phases = phaseDefs.map((p, i) => {
+    const found   = PHASE_MAP.filter(p => rawStr.some(s => p.re.test(s.replace(/:$/,'').trim())));
+    const defs    = found.length > 0 ? found : PHASE_MAP;
+    const today   = Date.now();
+    const phases  = defs.map((p, i) => {
       const startMs = today + i * 4 * 7 * 24 * 3600 * 1000;
       const weeksSpan = [];
-      for (let w = 0; w < 4; w++) {
-        weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
-      }
+      for (let w = 0; w < 4; w++) weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
       return { id: String(i + 1), team: p.team, hours: 40, durWeeks: 4, weeksSpan, startMs };
     });
-
     const proj = {
-      id:        Date.now(),
-      name:      fileName.replace(/\.mpp$/i,'').replace(/[_-]+/g,' ').trim(),
+      id: Date.now(),
+      name: fileName.replace(/\.mpp$/i,'').replace(/[_-]+/g,' ').trim(),
       startDate: new Date().toISOString().slice(0, 10),
       phases,
     };
     forecastProjects.push(proj);
-    statusEl.style.color = 'var(--green)';
-    statusEl.textContent = '\u2713 Imported ' + phases.length + ' phases from ' + fileName + '. Adjust start dates and durations as needed.';
+    statusEl.style.color = 'var(--yellow)';
+    statusEl.textContent = '\u26A0 Imported ' + phases.length + ' phases (MPXJ unavailable — dates need adjustment).';
     renderProjectList(); renderScenario(); saveState();
     return;
   }
