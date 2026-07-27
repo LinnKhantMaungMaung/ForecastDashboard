@@ -40,17 +40,25 @@ def extract_with_mpxj(filepath):
 
     try:
         import jpype
-        import jpype.imports
         if not jpype.isJVMStarted():
+            # Note: jvmargs are positional in JPype, not a keyword argument
             jpype.startJVM(
+                '-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory',
+                '-Dorg.slf4j.simpleLogger.defaultLogLevel=off',
                 classpath=jars,
-                convertStrings=True,
-                jvmargs=['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory',
-                         '-Dorg.slf4j.simpleLogger.defaultLogLevel=off']
+                convertStrings=True
             )
+        # jpype.imports must be imported AFTER JVM is started
+        import jpype.imports
 
-        from net.sf.mpxj.reader import UniversalProjectReader
-        from net.sf.mpxj import TimeUnit
+        # pip mpxj 13+ uses org.mpxj; older bundled JARs use net.sf.mpxj
+        # Try new package name first, fall back to old
+        try:
+            from org.mpxj.reader import UniversalProjectReader
+            from org.mpxj import TimeUnit
+        except Exception:
+            from net.sf.mpxj.reader import UniversalProjectReader
+            from net.sf.mpxj import TimeUnit
         import java.io.File as JFile
 
         project    = UniversalProjectReader().read(JFile(filepath))
