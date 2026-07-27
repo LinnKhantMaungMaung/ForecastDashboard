@@ -240,6 +240,47 @@ app.post('/api/claude', async (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// ── MPP file parser ──────────────────────────────────────────────────────────
+app.post('/api/parse-mpp', require('express').raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
+  const fs   = require('fs');
+  const os   = require('os');
+  const path = require('path');
+  const { execFile } = require('child_process');
+
+  if (!req.body || req.body.length === 0) {
+    return res.status(400).json({ error: 'No file data received' });
+  }
+
+  const tmpFile    = path.join(os.tmpdir(), 'upload_' + Date.now() + '.mpp');
+  const scriptPath = path.join(__dirname, 'mpp_extract.py');
+
+  if (!fs.existsSync(scriptPath)) {
+    return res.status(500).json({ error: 'mpp_extract.py not found. Please add it to server/ directory.' });
+  }
+
+  try {
+    fs.writeFileSync(tmpFile, req.body);
+  } catch(err) {
+    return res.status(500).json({ error: 'Could not write temp file: ' + err.message });
+  }
+
+  console.log('[MPP] Parsing ' + req.body.length + ' bytes');
+
+  execFile('python3', [scriptPath, tmpFile], { timeout: 30000 }, (err, stdout, stderr) => {
+    // Always clean up temp file
+    try { fs.unlinkSync(tmpFile); } catch {}
+    if (stderr) console.log('[MPP stderr]', stderr.slice(0, 300));
+    if (err) {
+      return res.status(500).json({ error: 'Extractor failed: ' + err.message });
+    }
+    try {
+      res.json(JSON.parse(stdout));
+    } catch(e) {
+      res.status(500).json({ error: 'Invalid JSON from extractor: ' + stdout.slice(0, 100) });
+    }
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Dashboard proxy running at http://localhost:${PORT}`);
   console.log(`   RG account : ${process.env.RG_ACCOUNT || '(not set — check .env)'}`);
