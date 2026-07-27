@@ -1,57 +1,84 @@
 #!/usr/bin/env python3
 """
-MPP extractor using MPXJ — reads task names, dates, durations, resources.
-Requires: pip install mpxj jpype1
-MPXJ JARs must be in server/mpxj/ directory.
+MPP extractor using MPXJ via pip package.
+Install: pip install jpype1 olefile mpxj
+No JAR files needed - pip mpxj bundles everything.
 Usage: python3 mpp_extract.py <file.mpp>
 """
 import sys, json, os, glob
 
-def extract_with_mpxj(filepath):
-    jar_dir = os.path.join(os.path.dirname(__file__), 'mpxj')
-    jars    = glob.glob(os.path.join(jar_dir, '*.jar')) + \
-              glob.glob(os.path.join(jar_dir, 'lib', '*.jar'))
 
+def find_mpxj_jars():
+    """Find JARs from pip-installed mpxj package."""
+    try:
+        import mpxj as mpxj_pkg
+        pkg_dir = os.path.dirname(mpxj_pkg.__file__)
+        jars = glob.glob(os.path.join(pkg_dir, '**', '*.jar'), recursive=True)
+        if jars:
+            return jars
+    except ImportError:
+        pass
+
+    # Fallback: check common pip install locations
+    for base in ['/usr/local/lib', '/usr/lib']:
+        jars = glob.glob(os.path.join(base, '**/mpxj/**/*.jar'), recursive=True)
+        if jars:
+            return jars
+
+    # Last resort: local server/mpxj directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    local_dir  = os.path.join(script_dir, 'mpxj')
+    jars = glob.glob(os.path.join(local_dir, '*.jar')) + \
+           glob.glob(os.path.join(local_dir, 'lib', '*.jar'))
+    return jars
+
+
+def extract_with_mpxj(filepath):
+    jars = find_mpxj_jars()
     if not jars:
-        return None, 'MPXJ JARs not found in server/mpxj/'
+        return None, 'MPXJ JARs not found. Run: pip install mpxj jpype1'
 
     try:
-        import jpype, jpype.imports
+        import jpype
+        import jpype.imports
         if not jpype.isJVMStarted():
-            # Suppress Log4j2 warning about missing log4j-core
-            import os as _os
-            _os.environ['LOG4J_FORMAT_MSG_NO_LOOKUPS'] = 'true'
-            jpype.startJVM(classpath=jars, convertStrings=True,
-                           jvmargs=['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory',
-                                    '-Dorg.slf4j.simpleLogger.defaultLogLevel=off',
-                                    '-Dlog4j.defaultInitOverride=true'])
+            jpype.startJVM(
+                classpath=jars,
+                convertStrings=True,
+                jvmargs=['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory',
+                         '-Dorg.slf4j.simpleLogger.defaultLogLevel=off']
+            )
 
         from net.sf.mpxj.reader import UniversalProjectReader
         from net.sf.mpxj import TimeUnit
         import java.io.File as JFile
 
-        project   = UniversalProjectReader().read(JFile(filepath))
-        tasks_out = []
+        project    = UniversalProjectReader().read(JFile(filepath))
+        tasks_out  = []
 
         for t in project.getTasks():
-            if t.getID() is None or int(t.getID()) == 0: continue
+            if t.getID() is None or int(t.getID()) == 0:
+                continue
             name = str(t.getName()) if t.getName() else ''
-            if not name.strip(): continue
+            if not name.strip():
+                continue
 
             dur_h = 0.0
             dur   = t.getDuration()
             if dur:
                 try:
-                    dur_h = float(dur.convertUnits(
-                        TimeUnit.HOURS,
-                        project.getProjectProperties()
-                    ).getDuration())
-                except: pass
+                    dur_h = float(
+                        dur.convertUnits(TimeUnit.HOURS, project.getProjectProperties())
+                           .getDuration()
+                    )
+                except:
+                    pass
 
             resources = []
             for ra in t.getResourceAssignments():
-                if ra.getResource() and ra.getResource().getName():
-                    resources.append(str(ra.getResource().getName()))
+                r = ra.getResource()
+                if r and r.getName():
+                    resources.append(str(r.getName()))
 
             tasks_out.append({
                 'id':             int(t.getID()),
@@ -72,7 +99,7 @@ def extract_with_mpxj(filepath):
 
 
 def extract_strings_fallback(filepath):
-    """Fallback: UTF-16 string scan when MPXJ unavailable."""
+    """UTF-16 string scan fallback when MPXJ unavailable."""
     try:
         import olefile, struct, re
         NOISE = re.compile(
@@ -91,7 +118,8 @@ def extract_strings_fallback(filepath):
             r'Timeline$|Cost$|Earned Value$|External$|Inserted Project$|Tracking$|Work$|'
             r'Total Cost:|Fixed:|Actual:|Baseline:|Remaining:|Variance:|BAC:|'
             r'Cost:|CV:|Start:|Finish:|Dur:|Comp:|Actual Start:|Actual Finish:|'
-            r'WBS:|Duration:|Res:|Remain:|W\.Comp:)',
+            r'WBS:|Duration:|Res:|Remain:|W\.Comp:|Milestone Date:|'
+            r'Actual Dur:|Remaining Dur:)',
             re.I
         )
         ole    = olefile.OleFileIO(filepath)
@@ -100,19 +128,23 @@ def extract_strings_fallback(filepath):
         for sp in ole.listdir():
             try:
                 data = ole.openstream(sp).read()
-            except: continue
+            except:
+                continue
             i = 0
             while i < len(data) - 3:
                 if 0x20 <= data[i] <= 0x7e and data[i+1] == 0:
                     chars = []
                     j = i
                     while j+1 < len(data) and 0x20 <= data[j] <= 0x7e and data[j+1] == 0:
-                        chars.append(chr(data[j])); j += 2
+                        chars.append(chr(data[j]))
+                        j += 2
                     if len(chars) >= 3:
                         text = ''.join(chars).strip()
-                        if (text and text not in seen and len(text) > 3
+                        if (text and text not in seen
+                                and len(text) > 3
                                 and sum(c.isalpha() for c in text) >= 2
-                                and '\\' not in text and '!' not in text
+                                and '\\' not in text
+                                and '!' not in text
                                 and not re.search(r'[<>{}="@]', text)
                                 and not NOISE.search(text)
                                 and not re.match(r'^[^a-zA-Z0-9\s]', text)):
@@ -133,15 +165,15 @@ if __name__ == '__main__':
 
     filepath = sys.argv[1]
 
-    # Try MPXJ first
+    # Try MPXJ first (full structured data with dates/durations)
     result, err = extract_with_mpxj(filepath)
     if result:
         print(json.dumps(result))
         sys.exit(0)
 
-    print(f'[mpp_extract] MPXJ failed ({err}), falling back to string scan', file=sys.stderr)
+    print(f'[mpp_extract] MPXJ unavailable ({err}), using string scan fallback', file=sys.stderr)
 
-    # Fallback to string scan
+    # Fallback: extract readable strings from binary
     result, err = extract_strings_fallback(filepath)
     if result:
         print(json.dumps(result))
