@@ -1,155 +1,149 @@
 #!/usr/bin/env python3
 """
-MPP extractor: reads Microsoft Project .mpp files and outputs JSON task list.
-Scans OLE2 streams for UTF-16 encoded strings, filters noise, returns tasks.
+MPP extractor using MPXJ — reads task names, dates, durations, resources.
+Requires: pip install mpxj jpype1
+MPXJ JARs must be in server/mpxj/ directory.
+Usage: python3 mpp_extract.py <file.mpp>
 """
-import sys, json, re
+import sys, json, os, glob
 
-# Noise: view metadata, resource names, payment terms, fragments
-NOISE = re.compile(
-    r'^(\*|#|\$|%|&|\'|\(|[0-9]|\+|-(?![a-zA-Z])|/)|'
-    r'(LINK_|&Gantt|&All|&No |&Entry|Time&|Resource|Gantt|'
-    r'Calendar|Network|Project Summary|WBS$|Segoe|Calibri|gbui:|'
-    r'CV_iew|Sprint|GBP$|MTI$|FDS$|'
-    r'(?:payment|Quoted Leadtimes|% on |on Order|on FDS|on Completion|on Delivery))|'
-    r'(ID:|EAC:|BCWS:|SV:|VAC:|ACWP:|CWS:|CWP:|W\.Comp)$|'
-    r'^(Template|Standard|Not Started|Next up|In progress|Done|'
-    r'Inactive|Manual\s|Duration-only|Start-only|Finish-only|'
-    r'Used for Microsoft|Charles |tasks$|resources$|'
-    r'Entry$|All Tasks$|Active Tasks$|No Task Group$|No Resource Group$|'
-    r'Task Name$|Max\. Units$|Std\. Rate$|Ovt\. Rate$|Cost/Use$|'
-    r'Task Form$|Task Sheet$|Task$|Split$|Milestone$|Summary$|No Group$|'
-    r'Timeline$|Cost$|Earned Value$|External$|Inserted Project$|Tracking$|Work$|'
-    r'Total Cost:|Fixed:|Actual:|Baseline:|Remaining:|Variance:|BAC:|'
-    r'Cost:|CV:|Start:|Finish:|Dur:|Comp:|Actual Start:|Actual Finish:|'
-    r'WBS:|Duration:|Res:|Remain:|W\.Comp:|Milestone Date:|Actual Dur:|Remaining Dur:|Work:)',
-    re.I
-)
+def extract_with_mpxj(filepath):
+    jar_dir = os.path.join(os.path.dirname(__file__), 'mpxj')
+    jars    = glob.glob(os.path.join(jar_dir, '*.jar')) + \
+              glob.glob(os.path.join(jar_dir, 'lib', '*.jar'))
 
-RESOURCE = re.compile(
-    r'^(Design Engineer|Control Systems? Engineer|Procurement$|Panel Shop$|'
-    r'Install Team$|Project Manager$|Robotics Engineer|Customer$|Sales$|'
-    r'Chris Jones|Jack Edwards|Site Lead$|Service Manager$|'
-    r'Holloway Controls|End User$|Tester$|Control System Engineer|'
-    r'CCustomer|Conrol System)$',
-    re.I
-)
+    if not jars:
+        return None, 'MPXJ JARs not found in server/mpxj/'
 
-
-def is_task_like(s):
-    if len(s) < 3 or len(s) > 150:            return False
-    if re.match(r'^[\d\s./:%-]+$', s):         return False
-    if '\\' in s or '!' in s:                  return False
-    if re.search(r'[<>{}="@]', s):             return False
-    if not any(c.isalpha() for c in s):        return False
-    if NOISE.search(s):                        return False
-    if RESOURCE.search(s):                     return False
-    # Fragment check: starts with special char prefix like ')Design' or '-Procurement'
-    if re.match(r'^[^a-zA-Z0-9\s]', s):       return False
-    # Word fragment: starts lowercase or is a truncated phrase ending mid-word
-    if s[0].islower() and len(s) < 10:         return False
-    # Partial words: 'roject', 'ing Dur:', 'ctual Start:' etc.
-    if re.match(r'^[a-z]{2,}[A-Z\s]', s):     return False
-    return True
-
-
-def extract_from_mpp(filepath):
     try:
-        import olefile
-    except ImportError:
-        return {"error": "olefile not installed. Run: pip install olefile", "tasks": []}
-    try:
-        ole = olefile.OleFileIO(filepath)
+        import jpype, jpype.imports
+        if not jpype.isJVMStarted():
+            # Suppress Log4j2 warning about missing log4j-core
+            import os as _os
+            _os.environ['LOG4J_FORMAT_MSG_NO_LOOKUPS'] = 'true'
+            jpype.startJVM(classpath=jars, convertStrings=True,
+                           jvmargs=['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory',
+                                    '-Dorg.slf4j.simpleLogger.defaultLogLevel=off',
+                                    '-Dlog4j.defaultInitOverride=true'])
+
+        from net.sf.mpxj.reader import UniversalProjectReader
+        from net.sf.mpxj import TimeUnit
+        import java.io.File as JFile
+
+        project   = UniversalProjectReader().read(JFile(filepath))
+        tasks_out = []
+
+        for t in project.getTasks():
+            if t.getID() is None or int(t.getID()) == 0: continue
+            name = str(t.getName()) if t.getName() else ''
+            if not name.strip(): continue
+
+            dur_h = 0.0
+            dur   = t.getDuration()
+            if dur:
+                try:
+                    dur_h = float(dur.convertUnits(
+                        TimeUnit.HOURS,
+                        project.getProjectProperties()
+                    ).getDuration())
+                except: pass
+
+            resources = []
+            for ra in t.getResourceAssignments():
+                if ra.getResource() and ra.getResource().getName():
+                    resources.append(str(ra.getResource().getName()))
+
+            tasks_out.append({
+                'id':             int(t.getID()),
+                'name':           name,
+                'outline_level':  int(t.getOutlineLevel()) if t.getOutlineLevel() else 0,
+                'is_summary':     bool(t.getSummary()),
+                'start':          str(t.getStart())[:10] if t.getStart() else None,
+                'finish':         str(t.getFinish())[:10] if t.getFinish() else None,
+                'duration_hours': round(dur_h, 1),
+                'dur_weeks':      max(1, round(dur_h / 40)) if dur_h > 0 else 1,
+                'resources':      resources,
+            })
+
+        return {'source': 'mpxj', 'tasks': tasks_out}, None
+
     except Exception as e:
-        return {"error": str(e), "tasks": []}
-
-    # Try embedded XML first
-    for sp in ole.listdir():
-        try:
-            data = ole.openstream(sp).read()
-            if b"<Project" in data or b"<Tasks>" in data:
-                r = parse_mpp_xml(data)
-                if r.get('tasks'):
-                    return r
-        except:
-            continue
-
-    # Scan all streams for UTF-16-LE strings
-    seen = set()
-    strings = []
-    for sp in ole.listdir():
-        try:
-            data = ole.openstream(sp).read()
-        except:
-            continue
-        i = 0
-        while i < len(data) - 3:
-            if 0x20 <= data[i] <= 0x7e and data[i+1] == 0:
-                chars = []
-                j = i
-                while j + 1 < len(data) and 0x20 <= data[j] <= 0x7e and data[j+1] == 0:
-                    chars.append(chr(data[j]))
-                    j += 2
-                if len(chars) >= 3:
-                    text = ''.join(chars).strip()
-                    if text and text not in seen:
-                        seen.add(text)
-                        strings.append(text)
-                i = j
-            else:
-                i += 1
-
-    tasks = [s for s in strings if is_task_like(s)]
+        return None, str(e)
 
 
-
-    return {
-        "tasks":       [],
-        "raw_strings": tasks,
-        "source":      "raw_strings",
-    }
-
-
-def parse_mpp_xml(xml_bytes):
-    import xml.etree.ElementTree as ET
+def extract_strings_fallback(filepath):
+    """Fallback: UTF-16 string scan when MPXJ unavailable."""
     try:
-        root = ET.fromstring(xml_bytes.lstrip(b"\xef\xbb\xbf\xff\xfe\xfe\xff"))
-    except ET.ParseError as e:
-        return {"error": str(e), "tasks": []}
-    ns = {"ms": "http://schemas.microsoft.com/project"}
-    def find(el, tag):
-        return el.findtext("ms:"+tag, namespaces=ns) or el.findtext(tag) or ""
-    tasks, resources, assignments = [], {}, {}
-    for res in root.findall(".//ms:Resource", ns) or root.findall(".//Resource"):
-        uid = find(res, "UID"); name = find(res, "Name")
-        if name and uid: resources[uid] = name
-    for asn in root.findall(".//ms:Assignment", ns) or root.findall(".//Assignment"):
-        t = find(asn, "TaskUID"); r2 = find(asn, "ResourceUID")
-        if t and r2: assignments.setdefault(t, []).append({"resource": resources.get(r2, "Unknown")})
-    for task in root.findall(".//ms:Task", ns) or root.findall(".//Task"):
-        uid = find(task, "UID"); name = find(task, "Name")
-        if not name or uid == "0": continue
-        dur_str = find(task, "Duration") or "PT0H0M0S"
-        hrs = 0
-        m = re.search(r"PT(\d+)H", dur_str)
-        if m: hrs += int(m.group(1))
-        dm = re.search(r"P(\d+)D", dur_str)
-        if dm: hrs += int(dm.group(1)) * 8
-        outline = int(find(task, "OutlineLevel") or "0")
-        tasks.append({
-            "uid": uid, "name": name,
-            "start": find(task, "Start")[:10],
-            "finish": find(task, "Finish")[:10],
-            "duration_hours": hrs,
-            "dur_weeks": max(1, round(hrs / 40)) if hrs > 0 else 1,
-            "outline_level": outline, "is_summary": outline <= 1,
-            "assignments": assignments.get(uid, []),
-        })
-    return {"tasks": tasks, "resources": list(resources.values()), "source": "xml"}
+        import olefile, struct, re
+        NOISE = re.compile(
+            r'^(\*|#|\$|%|&|\'|\(|[0-9]|\+|-(?![a-zA-Z])|/)|'
+            r'(LINK_|&Gantt|&All|&No |&Entry|Time&|Resource|Gantt|Calendar|'
+            r'Network|Project Summary|WBS$|Segoe|Calibri|gbui:|CV_iew|Sprint|'
+            r'GBP$|MTI$|FDS$|(?:payment|Quoted Leadtimes|% on ))|'
+            r'(EAC:|BCWS:|SV:|VAC:|ACWP:|CWS:|CWP:|W\.Comp:|Milestone Date:|'
+            r'Actual Dur:|Remaining Dur:|Work:)$|'
+            r'^(Template|Standard|Not Started|Next up|In progress|Done|'
+            r'Inactive|Manual\s|Duration-only|Start-only|Finish-only|'
+            r'Used for Microsoft|Charles |tasks$|resources$|'
+            r'Entry$|All Tasks$|Active Tasks$|No Task Group$|No Resource Group$|'
+            r'Task Name$|Max\. Units$|Std\. Rate$|Ovt\. Rate$|Cost/Use$|'
+            r'Task Form$|Task Sheet$|Task$|Split$|Milestone$|Summary$|No Group$|'
+            r'Timeline$|Cost$|Earned Value$|External$|Inserted Project$|Tracking$|Work$|'
+            r'Total Cost:|Fixed:|Actual:|Baseline:|Remaining:|Variance:|BAC:|'
+            r'Cost:|CV:|Start:|Finish:|Dur:|Comp:|Actual Start:|Actual Finish:|'
+            r'WBS:|Duration:|Res:|Remain:|W\.Comp:)',
+            re.I
+        )
+        ole    = olefile.OleFileIO(filepath)
+        seen   = set()
+        result = []
+        for sp in ole.listdir():
+            try:
+                data = ole.openstream(sp).read()
+            except: continue
+            i = 0
+            while i < len(data) - 3:
+                if 0x20 <= data[i] <= 0x7e and data[i+1] == 0:
+                    chars = []
+                    j = i
+                    while j+1 < len(data) and 0x20 <= data[j] <= 0x7e and data[j+1] == 0:
+                        chars.append(chr(data[j])); j += 2
+                    if len(chars) >= 3:
+                        text = ''.join(chars).strip()
+                        if (text and text not in seen and len(text) > 3
+                                and sum(c.isalpha() for c in text) >= 2
+                                and '\\' not in text and '!' not in text
+                                and not re.search(r'[<>{}="@]', text)
+                                and not NOISE.search(text)
+                                and not re.match(r'^[^a-zA-Z0-9\s]', text)):
+                            seen.add(text)
+                            result.append(text)
+                    i = j
+                else:
+                    i += 1
+        return {'source': 'raw_strings', 'raw_strings': result}, None
+    except Exception as e:
+        return None, str(e)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: mpp_extract.py <file.mpp>"}))
+        print(json.dumps({'error': 'Usage: mpp_extract.py <file.mpp>'}))
         sys.exit(1)
-    print(json.dumps(extract_from_mpp(sys.argv[1]), indent=2))
+
+    filepath = sys.argv[1]
+
+    # Try MPXJ first
+    result, err = extract_with_mpxj(filepath)
+    if result:
+        print(json.dumps(result))
+        sys.exit(0)
+
+    print(f'[mpp_extract] MPXJ failed ({err}), falling back to string scan', file=sys.stderr)
+
+    # Fallback to string scan
+    result, err = extract_strings_fallback(filepath)
+    if result:
+        print(json.dumps(result))
+    else:
+        print(json.dumps({'error': err or 'Could not parse MPP file'}))
