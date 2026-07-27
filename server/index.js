@@ -240,6 +240,102 @@ app.post('/api/claude', async (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// ── MPP file parser + Claude AI ──────────────────────────────────────────────
+// Receives raw MPP binary, extracts strings via Python, then asks Claude
+// to parse task names, dates, durations and resource → team mapping
+app.post('/api/parse-mpp-ai', require('express').raw({ type: 'application/octet-stream', limit: '50mb' }), async (req, res) => {
+  const fs   = require('fs');
+  const os   = require('os');
+  const path = require('path');
+  const { execFile } = require('child_process');
+
+  if (!req.body || req.body.length === 0) return res.status(400).json({ error: 'No file data' });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
+
+  const tmpFile    = path.join(os.tmpdir(), 'mppai_' + Date.now() + '.mpp');
+  const scriptPath = path.join(__dirname, 'mpp_extract.py');
+
+  try {
+    fs.writeFileSync(tmpFile, req.body);
+  } catch(e) {
+    return res.status(500).json({ error: 'Could not write temp file: ' + e.message });
+  }
+
+  // Step 1: extract raw strings from binary MPP
+  let extracted;
+  try {
+    extracted = await new Promise((resolve, reject) => {
+      execFile('python3', [scriptPath, tmpFile], { timeout: 30000 }, (err, stdout, stderr) => {
+        try { fs.unlinkSync(tmpFile); } catch {}
+        if (err) return reject(new Error('Extractor failed: ' + err.message));
+        try { resolve(JSON.parse(stdout)); }
+        catch(e) { reject(new Error('Bad extractor output: ' + stdout.slice(0,100))); }
+      });
+    });
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  // If embedded XML found — return directly, no AI needed
+  if (extracted.tasks && extracted.tasks.length > 0) {
+    return res.json({ source: 'xml', tasks: extracted.tasks });
+  }
+
+  // Step 2: send raw strings to Claude for intelligent parsing
+  const rawStrings = (extracted.raw_strings || []).slice(0, 120);
+  if (rawStrings.length === 0) return res.status(422).json({ error: 'No task data found in MPP file' });
+
+  const availableTeams = ['Design','HELIX','Electrical Installation','Control Panels - Notts',
+    'PLC','PLC - Amazon','Robotics','Projects','Service','Director','Unassigned'];
+
+  const teamList = availableTeams.join(', ');
+  const stringList = rawStrings.join('\n');
+  const prompt = 'You are parsing a Microsoft Project file for MotionTech, an automation systems integrator.\n\n' +
+    'Strings extracted from the binary:\n' + stringList + '\n\n' +
+    'Available teams: ' + teamList + '\n\n' +
+    'Return ONLY a JSON array of tasks/phases. No explanation, no markdown:\n' +
+    '[{"name":"task name","team":"team from list","dur_weeks":2,"start_offset_weeks":0,"is_summary":false}]\n\n' +
+    'Rules:\n' +
+    '- Section headers (Design: Electrical, Build:, Commissioning: etc) = is_summary true\n' +
+    '- Match team from context: Design Engineer/Electrical -> Design, Control Systems/PLC tasks -> PLC, Commissioning -> PLC, Install -> Electrical Installation, Panel Build -> Control Panels - Notts, Software/HELIX -> HELIX, Project Manager -> Projects\n' +
+    '- dur_weeks: estimate from name (14 days=3w, 5 days=1w, 4 wks=4w, default 2)\n' +
+    '- start_offset_weeks: cumulative sequential offset from 0\n' +
+    '- Skip: standalone resource name strings, payment terms, UI strings like Gantt/Timeline';
+
+  try {
+    const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type':      'application/json',
+        'x-api-key':         process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        messages:   [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!aiResp.ok) {
+      const err = await aiResp.text();
+      return res.status(500).json({ error: 'Claude API error: ' + err.slice(0, 200) });
+    }
+
+    const aiData = await aiResp.json();
+    const raw    = (aiData.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+
+    let tasks;
+    try { tasks = JSON.parse(raw); }
+    catch(e) { return res.status(500).json({ error: 'Claude returned unparseable JSON', raw: raw.slice(0,200) }); }
+
+    res.json({ source: 'ai', tasks, model: 'claude-haiku-4-5-20251001' });
+
+  } catch(e) {
+    res.status(500).json({ error: 'Claude call failed: ' + e.message });
+  }
+});
+
 // ── MPP file parser ──────────────────────────────────────────────────────────
 app.post('/api/parse-mpp', require('express').raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
   const fs   = require('fs');
