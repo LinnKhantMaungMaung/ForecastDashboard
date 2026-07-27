@@ -316,7 +316,7 @@
         <button class="btn" style="margin-top:8px;background:var(--surface2);border:1px solid var(--border);color:var(--accent);width:100%;display:flex;align-items:center;justify-content:center;gap:6px" onclick="document.getElementById('import-project-file').click()">
           📂 Import from File
         </button>
-        <input type="file" id="import-project-file" accept=".json,.xlsx,.xls,.csv,.txt" style="display:none" onchange="importProjectFile(this)">
+        <input type="file" id="import-project-file" accept=".json,.csv,.txt,.mpp" style="display:none" onchange="importProjectFile(this)">
         <div id="import-status" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'DM Mono',monospace;display:none"></div>
       </div>
       <!-- Project list -->
@@ -949,6 +949,138 @@ function refreshWithOptions(){
     if(selA) selA.innerHTML=opts;
   });
 }
+// Map a task name to the closest matching team using keyword rules
+// No AI — pure string matching against known department keywords
+function guessTeamFromTaskName(taskName) {
+  const t = (taskName || '').toLowerCase();
+  // Order matters — check more specific before general
+  if (/plc.*amazon|amazon.*plc/i.test(t))                           return 'PLC - Amazon';
+  if (/plc|controls? engineer|controls? prog|software.*plc/i.test(t)) return 'PLC';
+  if (/robot|robotics|abb|kuka|fanuc/i.test(t))                     return 'Robotics';
+  if (/panel.*build|panel.*wire|control.*panel|cp/i.test(t))      return 'Control Panels - Notts';
+  if (/design|cad|drawing|schematic|layout/i.test(t))               return 'Design';
+  if (/install|electrical.*install|site.*electric|cable|trunking/i.test(t)) return 'Electrical Installation';
+  if (/project.*manage|pm|project.*coord|planning/i.test(t))      return 'Projects';
+  if (/helix|software.*dev|software.*proj|web|app/i.test(t))      return 'HELIX';
+  if (/service|support|maintenance|repair|breakdown/i.test(t))      return 'Service';
+  if (/director|head of|management|steer|review/i.test(t))          return 'Director';
+  // Default to first available team
+  return ALL_TEAMS[0] || 'Projects';
+}
+
+// Convert parsed MPP data into scenario forecast projects — no AI required
+function processMppData(mppData, fileName, statusEl) {
+  statusEl.style.color = 'var(--muted)';
+  statusEl.textContent = 'Mapping tasks to teams...';
+
+  const tasks  = mppData.tasks      || [];
+  const rawStr = mppData.raw_strings || [];
+
+  // ── Structured XML data (best case) ──────────────────────────────────────
+  if (tasks.length > 0) {
+    const projects = {};
+    let currentProject = null;
+
+    // First pass: outline_level 1 = project header, 2+ = phases
+    for (const t of tasks) {
+      if (!t.name || t.name.trim() === '') continue;
+      if (t.outline_level <= 1 || t.is_summary) {
+        currentProject = {
+          id:        Date.now() + Math.random(),
+          name:      t.name,
+          startDate: t.start || new Date().toISOString().slice(0,10),
+          endDate:   t.finish || '',
+          phases:    [],
+          _tasks:    [],
+        };
+        projects[t.uid] = currentProject;
+      } else if (currentProject) {
+        currentProject._tasks.push(t);
+      }
+    }
+
+    // If no hierarchy — treat all tasks as phases of one project
+    const projectList = Object.values(projects);
+    if (projectList.length === 0 && tasks.length > 0) {
+      projectList.push({
+        id:        Date.now(),
+        name:      fileName.replace(/\.mpp$/i,''),
+        startDate: tasks[0].start || new Date().toISOString().slice(0,10),
+        phases:    [],
+        _tasks:    tasks,
+      });
+    }
+
+    let imported = 0;
+    for (const proj of projectList) {
+      const phaseTasks = proj._tasks.length > 0 ? proj._tasks : [];
+
+      const phases = phaseTasks.map((t, i) => {
+        // Match team from task name keywords — no AI needed
+        const team    = guessTeamFromTaskName(t.name);
+        const startMs = new Date(t.start || proj.startDate).getTime();
+        const weeksSpan = [];
+        let cur = new Date(startMs);
+        for (let w = 0; w < (t.dur_weeks || 1); w++) {
+          weeksSpan.push(toWeekLabel(cur));
+          cur.setDate(cur.getDate() + 7);
+        }
+        return { id: String(i+1), team, hours: 40, durWeeks: t.dur_weeks || 1, weeksSpan, startMs };
+      });
+
+      // If project has no sub-tasks, make it a single phase itself
+      if (phases.length === 0) {
+        const startMs = new Date(proj.startDate).getTime();
+        const weeksSpan = [];
+        let cur = new Date(startMs);
+        for (let w = 0; w < 4; w++) { weeksSpan.push(toWeekLabel(cur)); cur.setDate(cur.getDate()+7); }
+        phases.push({ id: '1', team: guessTeamFromTaskName(proj.name), hours: 40, durWeeks: 4, weeksSpan, startMs });
+      }
+
+      delete proj._tasks;
+      proj.phases = phases;
+      forecastProjects.push(proj);
+      imported++;
+    }
+
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = '✓ Imported ' + imported + ' project(s) (' + tasks.length + ' tasks). Check team assignments and adjust if needed.';
+    renderProjectList(); renderScenario(); saveState();
+    return;
+  }
+
+  // ── Fallback: raw strings from binary — parse manually ───────────────────
+  if (rawStr.length > 0) {
+    // Filter to likely task names: mixed case, 3+ words or contains keywords
+    const likelyTasks = rawStr.filter(s =>
+      s.length > 4 && s.length < 100 &&
+      /[a-z]/.test(s) && /[A-Z]/.test(s) &&
+      !/^[\d\s./-]+$/.test(s)
+    );
+    if (likelyTasks.length > 0) {
+      const proj = {
+        id:        Date.now(),
+        name:      fileName.replace(/\.mpp$/i,''),
+        startDate: new Date().toISOString().slice(0,10),
+        phases:    likelyTasks.slice(0, 20).map((name, i) => {
+          const startMs = Date.now() + i * 7 * 24 * 3600 * 1000;
+          const cur = new Date(startMs);
+          const weeksSpan = [];
+          for (let w = 0; w < 4; w++) { weeksSpan.push(toWeekLabel(new Date(startMs + w*7*24*3600*1000))); }
+          return { id: String(i+1), team: guessTeamFromTaskName(name), hours: 40, durWeeks: 4, weeksSpan, startMs };
+        }),
+      };
+      forecastProjects.push(proj);
+      statusEl.style.color = 'var(--yellow)';
+      statusEl.textContent = '⚠ Imported from raw strings — dates and durations need manual adjustment.';
+      renderProjectList(); renderScenario(); saveState();
+      return;
+    }
+  }
+
+  throw new Error('No usable task data found in MPP file. Try File > Save As > XML in MS Project and import the XML instead.');
+}
+
 async function importProjectFile(input) {
   const file = input.files[0];
   if (!file) return;
@@ -959,6 +1091,21 @@ async function importProjectFile(input) {
   statusEl.textContent = 'Reading file...';
   const ext = file.name.split('.').pop().toLowerCase();
   try {
+    // ── MPP: Microsoft Project binary file ───────────────────────────────────
+    if (ext === 'mpp') {
+      statusEl.textContent = 'Parsing Microsoft Project file...';
+      const arrayBuf = await file.arrayBuffer();
+      const resp = await fetch('/api/parse-mpp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: arrayBuf,
+      });
+      if (!resp.ok) throw new Error('Server MPP parse failed: ' + resp.status);
+      const mppData = await resp.json();
+      if (mppData.error) throw new Error(mppData.error);
+      await processMppData(mppData, file.name, statusEl);
+      return;
+    }
     if (ext === 'json') {
       const text = await file.text();
       const data = JSON.parse(text);
@@ -990,7 +1137,7 @@ async function importProjectFile(input) {
       const startCol = findCol('start','begin','from');
       const durCol = findCol('duration','weeks','days','length');
       const hrCol = findCol('hour','hrs');
-      if (nameCol < 0) { await importWithAI(text, file.name); return; }
+      if (nameCol < 0) { throw new Error('CSV has no recognisable columns (project, name, team, start, duration). Please check the file format.'); }
       const projects = {};
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',').map(c => c.trim().replace(/"/g,''));
@@ -1012,47 +1159,29 @@ async function importProjectFile(input) {
       renderProjectList(); renderScenario(); saveState();
       return;
     }
+    // For unknown file types, try parsing as CSV with loose rules
     const text = await file.text();
-    await importWithAI(text, file.name);
-  } catch(err) {
-    statusEl.style.color = 'var(--red)';
-    statusEl.textContent = '✗ Import failed: ' + err.message;
-  }
-}
-
-async function importWithAI(fileContent, fileName) {
-  const statusEl = document.getElementById('import-status');
-  statusEl.style.color = 'var(--muted)';
-  statusEl.textContent = '🤖 Asking AI to parse file...';
-  const today = new Date().toISOString().slice(0,10);
-  const prompt = 'You are parsing a project spec file for a scenario planner.\nFile: ' + fileName + '\nAvailable teams: ' + ALL_TEAMS.join(', ') + '\nToday: ' + today + '\n\nExtract ALL projects. Return ONLY a JSON array, no explanation:\n[{"name":"Project Name","startDate":"YYYY-MM-DD","phases":[{"id":"1","team":"team name","hours":40,"durWeeks":4,"weeksSpan":[],"startMs":0}]}]\n\nFile content:\n' + fileContent.slice(0,3000);
-  try {
-    const resp = await fetch('/api/claude', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ messages:[{role:'user',content:prompt}] }) });
-    if (!resp.ok) throw new Error('AI request failed: ' + resp.status);
-    const data = await resp.json();
-    const raw = data.content?.[0]?.text || '';
-    let projects;
-    try { projects = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { throw new Error('AI returned unparseable response'); }
-    if (!Array.isArray(projects) || projects.length === 0) throw new Error('AI found no projects in file');
-    projects.forEach(proj => {
-      proj.id = Date.now() + Math.random();
-      proj.phases.forEach((ph, i) => {
-        ph.id = String(i+1);
-        const startMs = new Date(proj.startDate).getTime();
-        ph.startMs = startMs;
+    const lines = text.split('\n').filter(l => l.trim());
+    if (lines.length < 2) throw new Error('File has no readable content. For .mpp files use Microsoft Project to export as XML first.');
+    // Treat each non-empty line as a task name, build a single project
+    const proj = {
+      id: Date.now(),
+      name: file.name.replace(/\.[^.]+$/, ''),
+      startDate: new Date().toISOString().slice(0,10),
+      phases: lines.slice(0,20).map((name, i) => {
+        const startMs = Date.now() + i * 7 * 24 * 3600 * 1000;
         const weeksSpan = [];
-        let cur = new Date(startMs);
-        for (let w = 0; w < Math.ceil(ph.durWeeks||4); w++) { weeksSpan.push(toWeekLabel(cur)); cur.setDate(cur.getDate()+7); }
-        ph.weeksSpan = weeksSpan;
-      });
-      forecastProjects.push(proj);
-    });
-    statusEl.style.color = 'var(--green)';
-    statusEl.textContent = '✓ AI imported ' + projects.length + ' project(s)';
+        for (let w = 0; w < 4; w++) { weeksSpan.push(toWeekLabel(new Date(startMs + w*7*24*3600*1000))); }
+        return { id: String(i+1), team: guessTeamFromTaskName(name.trim()), hours: 40, durWeeks: 4, weeksSpan, startMs };
+      }),
+    };
+    forecastProjects.push(proj);
+    statusEl.style.color = 'var(--yellow)';
+    statusEl.textContent = '⚠ Imported as plain text — check teams and dates.';
     renderProjectList(); renderScenario(); saveState();
   } catch(err) {
     statusEl.style.color = 'var(--red)';
-    statusEl.textContent = '✗ AI parse failed: ' + err.message;
+    statusEl.textContent = '✗ Import failed: ' + err.message;
   }
 }
 
