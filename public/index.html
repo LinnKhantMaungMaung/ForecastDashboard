@@ -652,8 +652,7 @@ function init() {
   ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
   const sub = document.getElementById('util-subtitle');
   if (sub && ALL_WEEKS.length) {
-    const fy = w => w.replace(/\d+ /,'');
-    sub.textContent = ALL_WEEKS[0]+' – '+ALL_WEEKS[ALL_WEEKS.length-1];
+    sub.textContent = weekRangeWithDates(ALL_WEEKS[0], ALL_WEEKS[ALL_WEEKS.length-1]);
   }
   populateSelects();
   buildSettingsLists();
@@ -1011,18 +1010,34 @@ function processAiMppTasks(tasks, fileName, statusEl) {
 // MS Project File → Save As → XML produces a standard schema we can parse
 // directly in the browser using the native DOMParser.
 
-function resourceToTeam(resourceName) {
-  const r = (resourceName || '').toLowerCase();
-  if (/panel shop|panel build/i.test(r))           return 'Control Panels - Notts';
-  if (/install team|electrical install/i.test(r))  return 'Electrical Installation';
-  if (/design eng/i.test(r))                       return 'Design';
-  if (/control systems? eng|plc eng/i.test(r))     return 'PLC';
-  if (/software|helix/i.test(r))                   return 'HELIX';
-  if (/robotics/i.test(r))                         return 'Robotics';
-  if (/project manager|site lead/i.test(r))        return 'Projects';
-  if (/service manager/i.test(r))                  return 'Service';
-  if (/procurement/i.test(r))                      return 'Projects';
-  return null;
+// ── Category/team mapping (bracket-header rule) ─────────────────────────────
+// ONLY category/header tasks whose name contains a bracketed suffix like
+// "(Project Management)" determine team ownership. Task names or resource
+// assignments are never used to infer a team — per the safeguards below,
+// that produced unreliable mappings.
+const CATEGORY_TEAM_MAP = {
+  'project management': 'Projects',
+  'design':              'Design',
+  'plc':                 'PLC',
+  'panel build':         'Control Panels - Notts',
+  'electrical install':  'Electrical Installation',
+};
+
+// Extract the LAST bracketed group in a task name, e.g.
+// "Design: Software (PLC)" → "plc". Returns null if no brackets present.
+function extractCategoryBracket(taskName) {
+  const matches = [...(taskName || '').matchAll(/\(([^)]+)\)/g)];
+  if (!matches.length) return null;
+  return matches[matches.length - 1][1].trim().toLowerCase();
+}
+
+// Resolve a task name to a dashboard team, ONLY via the bracket rule.
+// Tasks without brackets (e.g. "Procurement", "Launch Date") return null
+// and are therefore never used to determine team ownership.
+function categoryToTeam(taskName) {
+  const bracket = extractCategoryBracket(taskName);
+  if (!bracket) return null;
+  return CATEGORY_TEAM_MAP[bracket] || null;
 }
 
 function parseMSProjectXml(xmlText, fileName, statusEl) {
@@ -1048,30 +1063,10 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     el.getElementsByTagNameNS(ns, tag)[0]?.textContent ||
     el.getElementsByTagName(tag)[0]?.textContent || '';
 
-  // ── Resources: build ID → name map ───────────────────────────────────────
-  const resources = {};
-  const resNodes  = [...doc.getElementsByTagNameNS(ns, 'Resource'),
-                     ...doc.getElementsByTagName('Resource')];
-  for (const r of resNodes) {
-    const uid  = get(r, 'UID');
-    const name = get(r, 'Name');
-    if (uid && name) resources[uid] = name;
-  }
-
-  // ── Assignments: task UID → [resource names] ─────────────────────────────
-  const assignments = {};
-  const asnNodes    = [...doc.getElementsByTagNameNS(ns, 'Assignment'),
-                       ...doc.getElementsByTagName('Assignment')];
-  for (const a of asnNodes) {
-    const tuid = get(a, 'TaskUID');
-    const ruid = get(a, 'ResourceUID');
-    if (tuid && ruid && resources[ruid]) {
-      if (!assignments[tuid]) assignments[tuid] = [];
-      assignments[tuid].push(resources[ruid]);
-    }
-  }
-
   // ── Tasks ─────────────────────────────────────────────────────────────────
+  // NOTE: Resources/Assignments are intentionally NOT parsed here — team
+  // ownership is decided purely by the bracket-category rule below, never by
+  // resource names or task-name keywords (see safeguards).
   const taskNodes = [...doc.getElementsByTagNameNS(ns, 'Task'),
                      ...doc.getElementsByTagName('Task')];
 
@@ -1083,20 +1078,9 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     const summary  = get(t, 'Summary') === '1' || get(t, 'Summary').toLowerCase() === 'true';
     const start    = get(t, 'Start').slice(0, 10);
     const finish   = get(t, 'Finish').slice(0, 10);
-    const durRaw   = get(t, 'Duration'); // ISO 8601 e.g. PT8H0M0S or P5DT0H0M0S
 
     if (!name || uid === '0') continue;
-
-    // Parse ISO duration → hours → weeks
-    let hrs = 0;
-    const hm = durRaw.match(/PT?(\d+)H/);  if (hm) hrs += parseInt(hm[1], 10);
-    const dm = durRaw.match(/P(\d+)D/);    if (dm) hrs += parseInt(dm[1], 10) * 8;
-    const durWeeks = hrs > 0 ? Math.max(1, Math.round(hrs / 40)) : 1;
-
-    allTasks.push({
-      uid, name, outline, summary, start, finish,
-      durWeeks, assigned: assignments[uid] || [],
-    });
+    allTasks.push({ uid, name, outline, summary, start, finish });
   }
 
   if (allTasks.length === 0) {
@@ -1105,77 +1089,111 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     return;
   }
 
-  // ── Build project → phases from outline hierarchy ─────────────────────────
-  // Level 1 summary = project, Level 2 summary = phase, Level 3+ = sub-tasks
-  const projects = [];
-  let curProject = null;
+  // ── Category/team aggregation (bracket-header rule) ───────────────────────
+  // Walk the tasks in document order, tracking a stack of currently-open
+  // category tasks by outline level. A category's scope ends as soon as a
+  // task at the same or a shallower outline level appears.
+  //
+  // Only category/header tasks with a bracket suffix — e.g. "(PLC)" —
+  // determine team ownership (categoryToTeam()). Everything nested beneath
+  // that category (summary or leaf, mapped or not) contributes ONLY its
+  // Start/Finish toward that category's earliest-start / latest-finish /
+  // duration span. Child tasks are never individually remapped to a
+  // different team.
+  const categories = [];   // finalized: { name, team, startDate, finishDate, childCount }
+  const stack = [];        // open categories: { level, name, team, start, finish, count }
+
+  function toDate(s) { return s ? new Date(s) : null; }
+  function foldInto(cat, t) {
+    const s = toDate(t.start), f = toDate(t.finish);
+    if (s && (!cat.start || s < cat.start)) cat.start = s;
+    if (f && (!cat.finish || f > cat.finish)) cat.finish = f;
+    cat.count++;
+  }
+  function closeCategoriesTo(level) {
+    while (stack.length && stack[stack.length - 1].level >= level) {
+      categories.push(stack.pop());
+    }
+  }
 
   for (const t of allTasks) {
-    // Skip noise sections (payment terms, quoted leadtimes)
+    // Skip noise sections that aren't task data (payment terms, lead times)
     if (/payment|quoted lead/i.test(t.name)) continue;
 
-    if (t.outline === 1 && t.summary) {
-      curProject = {
-        id:        Date.now() + Math.random(),
-        name:      t.name.replace(/:$/, '').trim(),
-        startDate: t.start || new Date().toISOString().slice(0, 10),
-        phases:    [],
-        _phaseTasks: [],
-      };
-      projects.push(curProject);
-    } else if (t.outline === 2 && t.summary && curProject) {
-      curProject._phaseTasks.push(t);
-    }
-    // outline 3+ sub-tasks are ignored for the scenario planner (too granular)
-  }
+    // Close any open categories that this task's outline level supersedes
+    closeCategoriesTo(t.outline);
 
-  // If no hierarchy, treat all non-summary tasks as phases of one project
-  if (projects.length === 0) {
-    const proj = {
-      id: Date.now(), name: fileName.replace(/\.xml$/i, '').replace(/[_-]+/g, ' ').trim(),
-      startDate: allTasks[0]?.start || new Date().toISOString().slice(0, 10),
-      phases: [], _phaseTasks: allTasks.filter(t => !t.summary),
-    };
-    projects.push(proj);
-  }
+    // Roll this task's dates up into whichever category is currently open
+    if (stack.length) foldInto(stack[stack.length - 1], t);
 
-  // ── Build phases from phase-level tasks ───────────────────────────────────
-  let imported = 0;
-  for (const proj of projects) {
-    const phaseSrc = proj._phaseTasks.length > 0 ? proj._phaseTasks : [];
-
-    proj.phases = phaseSrc.map((t, i) => {
-      // Team: try resource names first, then task name keywords
-      let team = null;
-      for (const res of t.assigned) {
-        team = resourceToTeam(res);
-        if (team) break;
+    // Does this task itself open a new mapped category?
+    // Rule: only bracketed category/header tasks determine team ownership.
+    // Un-bracketed headers (e.g. "Procurement", "Launch Date") do NOT open
+    // a category and are therefore never assigned a team via this path.
+    if (t.summary) {
+      const team = categoryToTeam(t.name);
+      if (team) {
+        const cat = { level: t.outline, name: t.name.replace(/:$/, '').trim(), team, start: null, finish: null, count: 0 };
+        foldInto(cat, t); // the category task's own span counts too
+        stack.push(cat);
       }
-      if (!team) team = guessTeamFromTaskName(t.name);
-
-      const startMs   = new Date(t.start || proj.startDate).getTime();
-      const weeksSpan = [];
-      for (let w = 0; w < t.durWeeks; w++) {
-        weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
-      }
-      return { id: String(i + 1), team, hours: 40, durWeeks: t.durWeeks, weeksSpan, startMs };
-    });
-
-    delete proj._phaseTasks;
-    if (proj.phases.length > 0) {
-      forecastProjects.push(proj);
-      imported++;
     }
   }
+  closeCategoriesTo(-Infinity); // flush anything still open at EOF
 
-  if (imported === 0) {
+  // ── Validation output (per spec) ───────────────────────────────────────────
+  console.group(`[XML Mapping Validation] ${fileName}`);
+  categories.forEach(c => {
+    const durDays = (c.start && c.finish) ? Math.round((c.finish - c.start) / 86400000) + 1 : null;
+    console.log(
+      `${c.name}\n→ ${c.team}\n\n` +
+      `Start: ${c.start ? formatDateShort(c.start) : 'n/a'}\n` +
+      `Finish: ${c.finish ? formatDateShort(c.finish) : 'n/a'}\n` +
+      `Duration: ${durDays != null ? durDays + ' days' : 'n/a'}\n\n` +
+      `Children: ${c.count}\n`
+    );
+  });
+  console.groupEnd();
+  window.lastXmlMappingValidation = categories.map(c => ({
+    category: c.name,
+    team: c.team,
+    start: c.start ? c.start.toISOString().slice(0,10) : null,
+    finish: c.finish ? c.finish.toISOString().slice(0,10) : null,
+    durationDays: (c.start && c.finish) ? Math.round((c.finish - c.start) / 86400000) + 1 : null,
+    childCount: c.count,
+  }));
+
+  // ── Build a single project with one phase per mapped category ─────────────
+  const mappedCategories = categories.filter(c => c.team && c.start && c.finish);
+  const proj = {
+    id:        Date.now(),
+    name:      fileName.replace(/\.xml$/i, '').replace(/[_-]+/g, ' ').trim(),
+    startDate: mappedCategories[0]?.start?.toISOString().slice(0,10) || new Date().toISOString().slice(0, 10),
+    phases:    mappedCategories
+      .sort((a, b) => a.start - b.start)
+      .map((c, i) => {
+        const durDays   = Math.max(1, Math.round((c.finish - c.start) / 86400000) + 1);
+        const durWeeks  = Math.max(1, Math.round(durDays / 7));
+        const startMs   = c.start.getTime();
+        const weeksSpan = [];
+        for (let w = 0; w < durWeeks; w++) {
+          weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
+        }
+        return { id: String(i + 1), team: c.team, hours: 40, durWeeks, weeksSpan, startMs };
+      }),
+  };
+
+  const skippedCount = categories.length - mappedCategories.length;
+
+  if (proj.phases.length === 0) {
     statusEl.style.color = 'var(--yellow)';
-    statusEl.textContent = '⚠ No phases found. The XML may only contain top-level tasks — adjust manually.';
+    statusEl.textContent = '⚠ No bracket-mapped categories found (e.g. "(PLC)", "(Design)"). Check the console for the full validation breakdown.';
   } else {
-    const totalPhases = forecastProjects.slice(-imported).reduce((s,p) => s + p.phases.length, 0);
+    forecastProjects.push(proj);
     statusEl.style.color = 'var(--green)';
-    statusEl.textContent = '✓ Imported ' + imported + ' project(s), ' + totalPhases
-      + ' phases from ' + fileName + ' (dates and durations from MS Project).';
+    statusEl.textContent = '✓ Imported ' + proj.phases.length + ' phase(s) from ' + fileName
+      + (skippedCount > 0 ? ` (${skippedCount} unmapped/un-bracketed category task(s) skipped — see console)` : '')
+      + '. See console for full validation output.';
   }
 
   renderProjectList(); renderScenario(); saveState();
@@ -1514,7 +1532,13 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
           }
           if (savedHighlight.length === 0) savedHighlight = null;
           legend.chart.update();
+          // HIDDEN_DEPTS is the single source of truth — update it here, then
+          // let every other view (Settings checkboxes, heatmap, engineers)
+          // re-render from it, exactly as toggleDept() does from Settings.
           syncDeptSettingsFromChart(label, !meta.hidden);
+          renderHeatmap();
+          if (document.getElementById('page-engineers')?.classList.contains('active')) renderEngineers();
+          renderScenario();
           saveState();
         }
       },tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}`}}},
@@ -1531,6 +1555,44 @@ function toWeekLabel(date){
   d.setUTCDate(d.getUTCDate()+4-dn);
   const ys=new Date(Date.UTC(d.getUTCFullYear(),0,1));
   return`${d.getUTCFullYear()} W${Math.ceil((((d-ys)/86400000)+1)/7)}`;
+}
+
+// ── Exact date range helpers (Fix 2) ───────────────────────────────────────────
+// Inverse of toWeekLabel: given "2026 W32" returns the Monday/Sunday UTC dates
+// of that ISO week, using the same timezone logic as toWeekLabel above.
+function weekLabelToRange(label) {
+  const m = /(\d{4})\s*W(\d+)/.exec(label || '');
+  if (!m) return null;
+  const year = +m[1], week = +m[2];
+  // Jan 4th is always in ISO week 1
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Dow = jan4.getUTCDay() || 7;
+  const mon = new Date(jan4);
+  mon.setUTCDate(jan4.getUTCDate() - jan4Dow + 1 + (week - 1) * 7);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  return { mon, sun };
+}
+
+const _MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatDateShort(d) {
+  if (!d) return '';
+  return String(d.getUTCDate()).padStart(2,'0') + ' ' + _MONTHS_SHORT[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+}
+
+// Returns e.g. "Week 32 · 04 Aug 2026 - 10 Aug 2026" or
+// "Weeks 32-36 · 04 Aug 2026 - 07 Sep 2026". Falls back to just the week
+// label(s) if the range can't be parsed (e.g. malformed label).
+function weekRangeWithDates(fromLabel, toLabel) {
+  toLabel = toLabel || fromLabel;
+  const a = weekLabelToRange(fromLabel);
+  const b = weekLabelToRange(toLabel);
+  const wNum = l => (/W(\d+)/.exec(l || '') || [])[1];
+  const wa = wNum(fromLabel), wb = wNum(toLabel);
+  const weekPart = (!wa || !wb) ? `${fromLabel} – ${toLabel}`
+                 : (wa === wb ? `Week ${wa}` : `Weeks ${wa}-${wb}`);
+  if (!a || !b) return weekPart;
+  return `${weekPart} · ${formatDateShort(a.mon)} - ${formatDateShort(b.sun)}`;
 }
 
 // ── AI panel ──────────────────────────────────────────────────────────────────
@@ -1860,7 +1922,7 @@ function jumpToWeek(fromId, toId, dateStr) {
     saveState();
   } else {
     // Date outside current range — show message
-    const msg = `Week ${wLabel} is outside the loaded range (${ALL_WEEKS[0]} – ${ALL_WEEKS[ALL_WEEKS.length-1]})`;
+    const msg = `Week ${wLabel} is outside the loaded range (${weekRangeWithDates(ALL_WEEKS[0], ALL_WEEKS[ALL_WEEKS.length-1])})`;
     alert(msg);
   }
 }
