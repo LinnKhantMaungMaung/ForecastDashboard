@@ -1177,17 +1177,26 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
   const stack = [];        // open categories: { level, name, team, children, ownFinish }
   const GAP_MERGE_DAYS = 3; // only applies between two fully-reliable dates
 
-  function isPlausibleStart(validStart) {
-    if (!validStart) return false;
+  // NOTE: this plausibility check applies to BOTH Start and Finish. Real
+  // data found: a task can have a genuinely wrong Finish too (not just
+  // Start) — e.g. a manually-typed date with a typo, sitting in the middle
+  // of an otherwise-correctly-dated project, with Manual=1 in the XML and
+  // essentially unlimited slack, confirming it's a stray, disconnected
+  // entry rather than real scheduling data. Finish was previously always
+  // trusted unconditionally — that let a single bad task (its category's
+  // only child) corrupt the whole category to a date a full year off.
+  function isPlausibleDate(d) {
+    if (!d) return false;
     if (!projectStart) return true; // no reference point available — trust whatever parses
-    const daysBeforeProjectStart = (projectStart - validStart) / 86400000;
+    const daysBeforeProjectStart = (projectStart - d) / 86400000;
     return daysBeforeProjectStart <= STALE_START_THRESHOLD_DAYS;
   }
   function foldInto(cat, t) {
-    const finish = toDate(t.finish);
-    if (!finish) return;
+    const rawFinish = toDate(t.finish);
+    const finish = isPlausibleDate(rawFinish) ? rawFinish : null;
+    if (!finish) return; // no trustworthy date at all for this child — drop it entirely
     const rawStart = toDate(t.start);
-    const validStart = isPlausibleStart(rawStart) ? rawStart : null;
+    const validStart = isPlausibleDate(rawStart) ? rawStart : null;
     cat.children.push({ name: t.name, start: validStart || finish, finish, hasValidStart: !!validStart });
   }
   function clusterChildren(children) {
