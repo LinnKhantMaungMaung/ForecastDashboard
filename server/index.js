@@ -33,96 +33,141 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ── In-memory cache ───────────────────────────────────────────────────────────
-let cache = { data: null, fetchedAt: null, expiresAt: null, building: false };
-const isCacheValid = () => cache.data && cache.expiresAt && new Date() < cache.expiresAt;
+// ── Per-date-range cache (Fix 3: no shared global state between users) ────────
+// Every distinct {from, to} range gets its own cache slot, keyed by "from_to".
+// Two users requesting different ranges never see or overwrite each other's data.
+// Users requesting the identical range legitimately share the cached result
+// (it's the same data either way — this is not "their" personal state).
+// No sessions, no cookies, no authentication involved.
+const RANGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours, per spec
+const rangeCaches = new Map(); // key "from_to" → { data, fetchedAt, expiresAt, building, buildPromise }
 
-
-// Custom date range — set by API call, defaults to current year Apr-Oct
-let customDateRange = null;
-
-function getDateRange() {
-  if (customDateRange) return customDateRange;
+const DEFAULT_RANGE = (() => {
   const year = new Date().getFullYear();
   return { from: `${year}-04-01`, to: `${year}-10-03` };
+})();
+
+function rangeKey(from, to) {
+  return `${from}_${to}`;
 }
 
-async function refreshCache() {
-  if (cache.building) return cache.data;
-  cache.building = true;
-  try {
-    const { from, to } = getDateRange();
-    const raw = await buildRawData(from, to);
-    cache.data      = raw;
-    cache.fetchedAt = new Date();
-    cache.expiresAt = new Date(Date.now() + CACHE_TTL);
-    console.log(`[Cache] Utilisation ready — ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
-
-    return raw;
-  } finally {
-    cache.building = false;
+// Pruning happens whenever the cache is accessed or updated, per spec.
+function pruneExpiredCaches() {
+  const now = Date.now();
+  for (const [key, entry] of rangeCaches) {
+    if (entry.expiresAt && entry.expiresAt.getTime() < now && !entry.building) {
+      rangeCaches.delete(key);
+    }
   }
 }
 
-// Start initial cache build on server startup
-refreshCache().catch(err => {
+function isEntryValid(entry) {
+  return !!(entry && entry.data && entry.expiresAt && Date.now() < entry.expiresAt.getTime());
+}
+
+// Fetch (or build) the data for a specific {from, to} range.
+// forceRefresh bypasses a still-valid cache entry and rebuilds.
+async function getDataForRange(from, to, forceRefresh = false) {
+  pruneExpiredCaches();
+  const key = rangeKey(from, to);
+  let entry = rangeCaches.get(key);
+
+  if (!forceRefresh && isEntryValid(entry)) {
+    return entry.data;
+  }
+
+  if (entry && entry.building) {
+    // Someone else already triggered a build for this exact range —
+    // wait for it instead of racing a second build or returning stale data.
+    return entry.buildPromise;
+  }
+
+  entry = entry || {};
+  entry.building = true;
+  rangeCaches.set(key, entry);
+
+  entry.buildPromise = (async () => {
+    try {
+      const raw = await buildRawData(from, to);
+      entry.data      = raw;
+      entry.fetchedAt = new Date();
+      entry.expiresAt = new Date(Date.now() + RANGE_CACHE_TTL_MS);
+      console.log(`[Cache] Range ${key} ready — ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
+      return raw;
+    } finally {
+      entry.building = false;
+    }
+  })();
+
+  return entry.buildPromise;
+}
+
+function getCacheStatus() {
+  pruneExpiredCaches();
+  const defaultKey = rangeKey(DEFAULT_RANGE.from, DEFAULT_RANGE.to);
+  return { key: defaultKey, entry: rangeCaches.get(defaultKey) || null, totalRanges: rangeCaches.size };
+}
+
+// Start initial cache build (default range) on server startup
+getDataForRange(DEFAULT_RANGE.from, DEFAULT_RANGE.to).catch(err => {
   console.error('[Cache] Initial build failed:', err.message);
   console.error('        Check your .env credentials.');
 });
 
-// Auto-refresh on schedule
+// Auto-refresh the default range on schedule (keeps the common case warm)
 setInterval(() => {
-  refreshCache().catch(err => console.error('[Cache] Refresh error:', err.message));
-}, CACHE_TTL);
+  getDataForRange(DEFAULT_RANGE.from, DEFAULT_RANGE.to, true)
+    .catch(err => console.error('[Cache] Refresh error:', err.message));
+}, RANGE_CACHE_TTL_MS);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// Health check + cache metadata
+// Health check + cache metadata (reports the default range's slot)
 app.get('/api/health', (req, res) => {
+  const { entry, totalRanges } = getCacheStatus();
   res.json({
-    status:       'ok',
-    cacheValid:   isCacheValid(),
-    building:     cache.building,
-    fetchedAt:    cache.fetchedAt,
-    expiresAt:    cache.expiresAt,
-    teamRows:     cache.data?.teams?.length     || 0,
-    engineerRows: cache.data?.engineers?.length || 0,
-    resourceTypes: cache.data?.resource_types   || [],
-    meta:         cache.data?.meta              || null,
+    status:        'ok',
+    cacheValid:    isEntryValid(entry),
+    building:      !!entry?.building,
+    fetchedAt:     entry?.fetchedAt  || null,
+    expiresAt:     entry?.expiresAt  || null,
+    teamRows:      entry?.data?.teams?.length     || 0,
+    engineerRows:  entry?.data?.engineers?.length || 0,
+    resourceTypes: entry?.data?.resource_types    || [],
+    meta:          entry?.data?.meta              || null,
+    activeRangeCaches: totalRanges,
   });
 });
 
-// Main data endpoint — returns full RAW object for the dashboard
+// Main data endpoint — returns full RAW object for the dashboard.
+// Each distinct {from, to} pair is cached independently (see rangeCaches above),
+// so concurrent users on different ranges never overwrite each other's data.
 app.get('/api/utilisation', async (req, res) => {
   try {
     const customFrom = req.query.from;
     const customTo   = req.query.to;
-    // Custom date range: set the range and do a full cache rebuild
-    if (req.query.refresh === '1' && customFrom && customTo) {
-      console.log(`[Cache] Setting custom range: ${customFrom} → ${customTo}`);
-      customDateRange = { from: customFrom, to: customTo };
-      await refreshCache();
-    } else if (req.query.refresh === '1') {
-      await refreshCache();
+    const forceRefresh = req.query.refresh === '1';
+    const { from, to } = (customFrom && customTo)
+      ? { from: customFrom, to: customTo }
+      : DEFAULT_RANGE;
+
+    if (forceRefresh) {
+      console.log(`[Cache] Refresh requested for range: ${from} → ${to}`);
     }
-    if (!cache.data) {
-      return res.status(503).json({
-        error: 'Data is still being built. Retry in ~30 seconds.',
-        building: cache.building,
-      });
-    }
-    res.json(cache.data);
+
+    const data = await getDataForRange(from, to, forceRefresh);
+    res.json(data);
   } catch (err) {
     console.error('[/api/utilisation]', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Reset to default date range
+// Reset to default date range — with per-range caching there's nothing global
+// to clear; this just ensures the default range's data is ready and returns it.
 app.get('/api/reset-range', async (req, res) => {
-  customDateRange = null;
-  await refreshCache();
-  res.json({ ok: true, range: getDateRange(), weeks: cache.data?.meta?.weeks });
+  const data = await getDataForRange(DEFAULT_RANGE.from, DEFAULT_RANGE.to);
+  res.json({ ok: true, range: DEFAULT_RANGE, weeks: data?.meta?.weeks });
 });
 
 
