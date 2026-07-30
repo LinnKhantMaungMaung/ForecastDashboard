@@ -1063,12 +1063,22 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     el.getElementsByTagNameNS(ns, tag)[0]?.textContent ||
     el.getElementsByTagName(tag)[0]?.textContent || '';
 
+  // IMPORTANT: getElementsByTagName() matches on qualified name regardless of
+  // namespace, so when the file declares xmlns="...project" (which MS Project
+  // exports always do), BOTH queries below return the SAME nodes. Combining
+  // them with [...a, ...b] silently doubled every task. Only fall back to the
+  // plain lookup if the namespaced one found nothing.
+  function getAllByTag(root, tag) {
+    const nsNodes = root.getElementsByTagNameNS(ns, tag);
+    if (nsNodes.length) return [...nsNodes];
+    return [...root.getElementsByTagName(tag)];
+  }
+
   // ── Tasks ─────────────────────────────────────────────────────────────────
   // NOTE: Resources/Assignments are intentionally NOT parsed here — team
   // ownership is decided purely by the bracket-category rule below, never by
   // resource names or task-name keywords (see safeguards).
-  const taskNodes = [...doc.getElementsByTagNameNS(ns, 'Task'),
-                     ...doc.getElementsByTagName('Task')];
+  const taskNodes = getAllByTag(doc, 'Task');
 
   const allTasks = [];
   for (const t of taskNodes) {
@@ -1089,41 +1099,163 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     return;
   }
 
+  // Hardened: rejects unparseable/placeholder values (e.g. "NA") instead of
+  // silently producing an Invalid Date that then breaks all downstream math.
+  function toDate(s) {
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // Reference point for detecting stale/placeholder Start values.
+  //
+  // IMPORTANT: this must NOT be the top-level "Project: ..." row's own
+  // Start field — that's a ROLLUP that MS Project sets to the EARLIEST
+  // Start among all its descendants, so if even one descendant carries a
+  // stale placeholder (e.g. "2025-07-21" when the project is really 2026),
+  // the rollup inherits that same bad value, making a plausibility check
+  // anchored to it circular and useless.
+  //
+  // Instead: take a MAJORITY VOTE on the year across every valid Start date
+  // in the whole file. A handful of stale outliers from a different year
+  // can't out-vote the dozens of legitimately-dated tasks, so the anchor
+  // stays reliable even when it's built from the same corrupted data pool.
+  const validStartDates = allTasks.map(t => toDate(t.start)).filter(Boolean);
+  const yearCounts = {};
+  validStartDates.forEach(d => { const y = d.getUTCFullYear(); yearCounts[y] = (yearCounts[y] || 0) + 1; });
+  let modeYear = null, modeYearCount = -1;
+  for (const [y, c] of Object.entries(yearCounts)) {
+    if (c > modeYearCount) { modeYear = +y; modeYearCount = c; }
+  }
+  let projectStart = null;
+  if (modeYear != null) {
+    const inModeYear = validStartDates.filter(d => d.getUTCFullYear() === modeYear);
+    if (inModeYear.length) projectStart = new Date(Math.min(...inModeYear.map(d => d.getTime())));
+  }
+  if (!projectStart) {
+    const allFinishes = allTasks.map(t => toDate(t.finish)).filter(Boolean);
+    if (allFinishes.length) projectStart = new Date(Math.min(...allFinishes.map(d => d.getTime())));
+  }
+  const STALE_START_THRESHOLD_DAYS = 180; // ~6 months grace for legitimate early long-lead items
+
   // ── Category/team aggregation (bracket-header rule) ───────────────────────
   // Walk the tasks in document order, tracking a stack of currently-open
   // category tasks by outline level. A category's scope ends as soon as a
-  // task at the same or a shallower outline level appears.
+  // task at the same or a shallower outline level appears — this closing
+  // check runs BEFORE the noise filter below, so a category still closes
+  // correctly even when the task that would trigger closure is itself
+  // skipped (e.g. a "Quoted Leadtimes:-"/"payment Terms:-" section sitting
+  // at the same outline level right after a real category — otherwise that
+  // category never closes and wrongly absorbs whatever comes next).
   //
   // Only category/header tasks with a bracket suffix — e.g. "(PLC)" —
-  // determine team ownership (categoryToTeam()). Everything nested beneath
-  // that category (summary or leaf, mapped or not) contributes ONLY its
-  // Start/Finish toward that category's earliest-start / latest-finish /
-  // duration span. Child tasks are never individually remapped to a
-  // different team.
-  const categories = [];   // finalized: { name, team, startDate, finishDate, childCount }
-  const stack = [];        // open categories: { level, name, team, start, finish, count }
+  // determine team ownership (categoryToTeam()). Category Start/Finish are
+  // computed PER CONTIGUOUS DATE CLUSTER of children, never one blind
+  // min/max span and never an all-or-nothing fallback — a single
+  // unreliable child must not block a category from splitting on a
+  // genuine gap elsewhere in its children.
+  //
+  // Per child, the "effective start" used for clustering is:
+  //   - its real Start, IF that's trustworthy: parses as a real date AND is
+  //     plausible (not more than STALE_START_THRESHOLD_DAYS before the
+  //     project's own start — catches placeholder Start values that parse
+  //     fine but are a year or more stale).
+  //   - otherwise, its own Finish date, treated as a single-day point event.
+  //
+  // Children are sorted by effective start and merged into clusters. The
+  // gap check between one cluster's Finish and the next child's effective
+  // start has two modes, because a single fixed threshold can't handle
+  // both "don't split on an artifact gap from Finish-substituted points"
+  // and "do split on a real few-day gap between fully reliable dates" at
+  // once: if BOTH sides of a boundary have a reliable Start, a small strict
+  // threshold applies; if EITHER side is a Finish-substituted point, that
+  // boundary always merges, since the "gap" isn't trustworthy evidence of
+  // real separation.
+  // Duration is business days (Mon-Fri) between a segment's Start/Finish.
+  // Child tasks are never individually remapped to a different team.
+  const categories = [];   // finalized segments: { name, team, start, finish, count }
+  const stack = [];        // open categories: { level, name, team, children, ownFinish }
+  const GAP_MERGE_DAYS = 3; // only applies between two fully-reliable dates
 
-  function toDate(s) { return s ? new Date(s) : null; }
-  function foldInto(cat, t) {
-    const s = toDate(t.start), f = toDate(t.finish);
-    if (s && (!cat.start || s < cat.start)) cat.start = s;
-    if (f && (!cat.finish || f > cat.finish)) cat.finish = f;
-    cat.count++;
+  function isPlausibleStart(validStart) {
+    if (!validStart) return false;
+    if (!projectStart) return true; // no reference point available — trust whatever parses
+    const daysBeforeProjectStart = (projectStart - validStart) / 86400000;
+    return daysBeforeProjectStart <= STALE_START_THRESHOLD_DAYS;
   }
-  function closeCategoriesTo(level) {
-    while (stack.length && stack[stack.length - 1].level >= level) {
-      categories.push(stack.pop());
+  function foldInto(cat, t) {
+    const finish = toDate(t.finish);
+    if (!finish) return;
+    const rawStart = toDate(t.start);
+    const validStart = isPlausibleStart(rawStart) ? rawStart : null;
+    cat.children.push({ name: t.name, start: validStart || finish, finish, hasValidStart: !!validStart });
+  }
+  function clusterChildren(children) {
+    if (!children.length) return [];
+    const sorted = [...children].sort((a, b) => a.start - b.start);
+    const clusters = [];
+    let cur = {
+      start: sorted[0].start, finish: sorted[0].finish, count: 1, members: [sorted[0].name],
+      lastHasValidStart: sorted[0].hasValidStart,
+    };
+    for (let i = 1; i < sorted.length; i++) {
+      const iv = sorted[i];
+      const bothReliable = cur.lastHasValidStart && iv.hasValidStart;
+      const gapDays = (iv.start - cur.finish) / 86400000;
+      const shouldMerge = !bothReliable || gapDays <= GAP_MERGE_DAYS;
+      if (shouldMerge) {
+        if (iv.finish > cur.finish) cur.finish = iv.finish;
+        cur.count++;
+        cur.members.push(iv.name);
+        cur.lastHasValidStart = iv.hasValidStart;
+      } else {
+        clusters.push(cur);
+        cur = { start: iv.start, finish: iv.finish, count: 1, members: [iv.name], lastHasValidStart: iv.hasValidStart };
+      }
     }
+    clusters.push(cur);
+    return clusters;
+  }
+  function finalizeCategory(cat) {
+    if (!cat.children.length) {
+      // No usable children at all — fall back to the header's own Finish
+      // so the category isn't dropped entirely.
+      return [{ name: cat.name, team: cat.team, start: cat.ownFinish, finish: cat.ownFinish, count: 0 }];
+    }
+    const clusters = clusterChildren(cat.children);
+    return clusters.map((cl, i) => ({
+      name:  clusters.length > 1 ? `${cat.name} — Segment ${i + 1}` : cat.name,
+      team:  cat.team,
+      start: cl.start, finish: cl.finish, count: cl.count,
+    }));
+  }
+  // Business days (Mon-Fri) between two dates, inclusive of both ends.
+  function businessDaysBetween(start, finish) {
+    if (!start || !finish) return null;
+    const cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    const end = new Date(Date.UTC(finish.getUTCFullYear(), finish.getUTCMonth(), finish.getUTCDate()));
+    if (cur > end) return 1;
+    let count = 0;
+    while (cur <= end) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) count++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return count;
   }
 
   for (const t of allTasks) {
+    // Close any open categories BEFORE checking the noise filter — see note
+    // above. This must run unconditionally for every task's outline level.
+    while (stack.length && stack[stack.length - 1].level >= t.outline) {
+      const closed = stack.pop();
+      categories.push(...finalizeCategory(closed));
+    }
+
     // Skip noise sections that aren't task data (payment terms, lead times)
     if (/payment|quoted lead/i.test(t.name)) continue;
 
-    // Close any open categories that this task's outline level supersedes
-    closeCategoriesTo(t.outline);
-
-    // Roll this task's dates up into whichever category is currently open
+    // Roll this task's effective date up into whichever category is open
     if (stack.length) foldInto(stack[stack.length - 1], t);
 
     // Does this task itself open a new mapped category?
@@ -1133,23 +1265,29 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     if (t.summary) {
       const team = categoryToTeam(t.name);
       if (team) {
-        const cat = { level: t.outline, name: t.name.replace(/:$/, '').trim(), team, start: null, finish: null, count: 0 };
-        foldInto(cat, t); // the category task's own span counts too
-        stack.push(cat);
+        const cat = {
+          level: t.outline, name: t.name.replace(/:$/, '').trim(), team,
+          children: [], ownFinish: toDate(t.finish),
+        };
+        stack.push(cat); // children (folded above/below) populate start/finish, NOT the header itself
       }
     }
   }
-  closeCategoriesTo(-Infinity); // flush anything still open at EOF
+  // flush anything left open at EOF
+  while (stack.length) {
+    const closed = stack.pop();
+    categories.push(...finalizeCategory(closed));
+  }
 
   // ── Validation output (per spec) ───────────────────────────────────────────
   console.group(`[XML Mapping Validation] ${fileName}`);
   categories.forEach(c => {
-    const durDays = (c.start && c.finish) ? Math.round((c.finish - c.start) / 86400000) + 1 : null;
+    const durDays = businessDaysBetween(c.start, c.finish);
     console.log(
       `${c.name}\n→ ${c.team}\n\n` +
       `Start: ${c.start ? formatDateShort(c.start) : 'n/a'}\n` +
       `Finish: ${c.finish ? formatDateShort(c.finish) : 'n/a'}\n` +
-      `Duration: ${durDays != null ? durDays + ' days' : 'n/a'}\n\n` +
+      `Duration: ${durDays != null ? durDays + ' business days' : 'n/a'}\n\n` +
       `Children: ${c.count}\n`
     );
   });
@@ -1159,11 +1297,11 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     team: c.team,
     start: c.start ? c.start.toISOString().slice(0,10) : null,
     finish: c.finish ? c.finish.toISOString().slice(0,10) : null,
-    durationDays: (c.start && c.finish) ? Math.round((c.finish - c.start) / 86400000) + 1 : null,
+    durationBusinessDays: businessDaysBetween(c.start, c.finish),
     childCount: c.count,
   }));
 
-  // ── Build a single project with one phase per mapped category ─────────────
+  // ── Build a single project with one phase per mapped category segment ────
   const mappedCategories = categories.filter(c => c.team && c.start && c.finish);
   const proj = {
     id:        Date.now(),
@@ -1172,8 +1310,8 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     phases:    mappedCategories
       .sort((a, b) => a.start - b.start)
       .map((c, i) => {
-        const durDays   = Math.max(1, Math.round((c.finish - c.start) / 86400000) + 1);
-        const durWeeks  = Math.max(1, Math.round(durDays / 7));
+        const durDays   = Math.max(1, businessDaysBetween(c.start, c.finish));
+        const durWeeks  = Math.max(1, Math.ceil(durDays / 5)); // 5 business days per week
         const startMs   = c.start.getTime();
         const weeksSpan = [];
         for (let w = 0; w < durWeeks; w++) {
@@ -1184,6 +1322,7 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
   };
 
   const skippedCount = categories.length - mappedCategories.length;
+  const splitCount = mappedCategories.filter(c => / — Segment \d+$/.test(c.name)).length;
 
   if (proj.phases.length === 0) {
     statusEl.style.color = 'var(--yellow)';
@@ -1192,6 +1331,7 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     forecastProjects.push(proj);
     statusEl.style.color = 'var(--green)';
     statusEl.textContent = '✓ Imported ' + proj.phases.length + ' phase(s) from ' + fileName
+      + (splitCount > 0 ? ` (${splitCount} split into separate date segments due to a gap in scheduling)` : '')
       + (skippedCount > 0 ? ` (${skippedCount} unmapped/un-bracketed category task(s) skipped — see console)` : '')
       + '. See console for full validation output.';
   }
