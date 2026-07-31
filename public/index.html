@@ -574,6 +574,10 @@
       <div><div class="settings-row-label">Show exact dates instead of week numbers</div><div class="settings-row-desc">Applies to the Scenario Planner Gantt and phase editor — e.g. "04 Aug 2026" instead of "2026 W32"</div></div>
       <label class="toggle"><input type="checkbox" id="s-showDates" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Show category tag beside team name</div><div class="settings-row-desc">For phases imported from XML — shows the original category (e.g. "Design: Software (PLC)") next to the team, in the project list, phase editor, and Gantt chart</div></div>
+      <label class="toggle"><input type="checkbox" id="s-showCategoryTags" onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
   </div>
   <div class="settings-note">Contractor detection requires Resource Guru resource types to be configured. Changes apply instantly across all tabs.</div>
 
@@ -644,7 +648,7 @@ let scenarioViewMode = 'utilisation';
 let phaseCounter = 0;
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
@@ -669,10 +673,13 @@ function applySettings() {
     managers:    document.getElementById('s-managers').checked,
     staff:       document.getElementById('s-staff').checked,
     showDates:   document.getElementById('s-showDates').checked,
+    showCategoryTags: document.getElementById('s-showCategoryTags').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
   renderScenario();
+  renderProjectList();
+  updatePhaseCategoryTagVisibility();
   saveState();
 }
 
@@ -1123,6 +1130,7 @@ function addPhase(){
   div.innerHTML=`
     <button onclick="removePhase(${id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">×</button>
     <div class="phase-label" style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Phase ${id}</div>
+    <div class="phase-category-tag" id="pc-${id}" style="font-size:10px;color:var(--muted);margin:-6px 0 8px;display:none"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><div class="form-label">Team</div><select class="form-input" id="pt-${id}" style="cursor:pointer">${teams}</select></div>
       <div><div class="form-label">Hrs/Week</div><input class="form-input" id="ph-${id}" type="number" min="1" placeholder="e.g. 80"></div>
@@ -1152,6 +1160,11 @@ function renumberPhases(){
       const lbl=el.querySelector('.phase-label');
       if(lbl) lbl.textContent='Phase '+(i+1);
     });
+}
+function updatePhaseCategoryTagVisibility() {
+  document.querySelectorAll('.phase-category-tag').forEach(el => {
+    el.style.display = (SETTINGS.showCategoryTags && el.textContent) ? 'block' : 'none';
+  });
 }
 function refreshWithOptions(){
   const phases=[...document.querySelectorAll('[id^="phase-"]')].filter(el=>el.id.match(/^phase-\d+$/));
@@ -1619,7 +1632,7 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
         for (let w = 0; w < durWeeks; w++) {
           weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
         }
-        return { id: String(i + 1), team: c.team, hours: 40, durWeeks, weeksSpan, startMs };
+        return { id: String(i + 1), team: c.team, hours: 40, durWeeks, weeksSpan, startMs, categoryName: c.name };
       }),
   };
 
@@ -1822,6 +1835,11 @@ function editProject(id) {
     const durFld   = document.getElementById(`pd-${pid}`);
     const unitSel  = document.getElementById(`pu-${pid}`);
     const offFld   = document.getElementById(`po-${pid}`);
+    const catTag   = document.getElementById(`pc-${pid}`);
+    if (catTag) {
+      catTag.textContent = ph.categoryName ? '🏷 ' + ph.categoryName : '';
+      catTag.style.display = (SETTINGS.showCategoryTags && ph.categoryName) ? 'block' : 'none';
+    }
     if (teamSel)  teamSel.value  = ph.team;
     if (hoursFld) hoursFld.value = ph.hours;
     if (durFld)   durFld.value   = ph.durWeeks || Math.ceil(ph.weeksSpan?.length || 4);
@@ -1847,7 +1865,7 @@ function renderProjectList(){
   const cw=document.getElementById('clear-btn-wrap');
   if(!forecastProjects.length){el.innerHTML='<div class="empty" style="padding:24px">No projects yet.</div>';if(cw)cw.style.display='none';return;}
   if(cw)cw.style.display='block';
-  el.innerHTML=forecastProjects.map(p=>`<div class="project-chip"><div style="flex:1"><div class="project-chip-name">${p.name}</div><div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s): ${p.phases.map(ph=>ph.team).join(', ')}</div></div><div style="display:flex;gap:6px;align-items:center"><button onclick="editProject(${p.id})" style="background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;padding:3px 8px;border-radius:6px;font-size:11px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">✏️</button><button class="chip-remove" onclick="removeProject(${p.id})">×</button></div></div>`).join('');
+  el.innerHTML=forecastProjects.map(p=>`<div class="project-chip"><div style="flex:1"><div class="project-chip-name">${p.name}</div><div class="project-chip-meta">${p.startDate} · ${p.phases.length} phase(s): ${p.phases.map(ph=>phaseTeamLabel(ph)).join(', ')}</div></div><div style="display:flex;gap:6px;align-items:center"><button onclick="editProject(${p.id})" style="background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;padding:3px 8px;border-radius:6px;font-size:11px;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">✏️</button><button class="chip-remove" onclick="removeProject(${p.id})">×</button></div></div>`).join('');
 }
 function applyAddPerson(){
   const team=document.getElementById('addperson-team').value;
@@ -1873,7 +1891,7 @@ function renderGantt(){
     h+=`<tr><td colspan="${gw.length+1}" style="padding:8px 10px 4px;font-size:12px;font-weight:700">${proj.name}</td></tr>`;
     proj.phases.forEach((ph,phi)=>{
       const col=pal[(pi*3+phi)%pal.length];
-      h+=`<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${ph.team}</td>`;
+      h+=`<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${phaseTeamLabel(ph)}</td>`;
       gw.forEach(w=>{
         const a=ph.weeksSpan.includes(w);
         h+=`<td style="height:26px;border-radius:4px;background:${a?col+'44':'transparent'};border:1px solid ${a?col:'transparent'};text-align:center">${a?`<span style="font-size:9px;color:${col}">${ph.hours}h</span>`:''}</td>`;
@@ -2047,6 +2065,22 @@ function weekColumnLabel(w) {
     if (range) return formatDateShort(range.mon).replace(/ \d{4}$/, '');
   }
   return (w || '').replace(/\d+ /, '');
+}
+
+// Small shared HTML escape — used when rendering category names pulled from
+// XML task names (they're generated internally, but escape anyway to be safe).
+function escHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// Team name for display, with the original XML category name appended when
+// the "show category tags" setting is on and the phase has one (only phases
+// imported from XML carry a categoryName — manually-added phases don't).
+function phaseTeamLabel(ph) {
+  if (SETTINGS.showCategoryTags && ph.categoryName) {
+    return `${escHtml(ph.team)} <span style="color:var(--muted);font-weight:400">— ${escHtml(ph.categoryName)}</span>`;
+  }
+  return escHtml(ph.team);
 }
 
 // ── AI panel ──────────────────────────────────────────────────────────────────
