@@ -646,6 +646,12 @@ let forecastProjects = [];
 let addPersonForecast = null;
 let scenarioViewMode = 'utilisation';
 let phaseCounter = 0;
+// When editing an imported project, snapshot each phase's original data here
+// (keyed by the phase card id) so addProject() can tell whether the user
+// actually changed anything for that phase. If they didn't, we reuse the
+// original weeklyHours/categoryName exactly instead of rebuilding a flat-
+// hours phase from the form fields and silently losing the precise data.
+let editingPhaseSnapshots = {};
 let tableRows = [];
 let engTableRows = [];
 let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false };
@@ -1867,9 +1873,26 @@ function addProject(){
   phaseEls.forEach(el=>{
     const id=el.id.replace('phase-','');
     const team=document.getElementById(`pt-${id}`)?.value;
-    const hours=parseFloat(document.getElementById(`ph-${id}`)?.value||0);
-    const dur=parseFloat(document.getElementById(`pd-${id}`)?.value||1);
+    const hoursRaw=document.getElementById(`ph-${id}`)?.value||'0';
+    const durRaw=document.getElementById(`pd-${id}`)?.value||'1';
     const unit=document.getElementById(`pu-${id}`)?.value||'weeks';
+    const offRaw=document.getElementById(`po-${id}`)?.value||'0';
+
+    // If this phase came from an XML import and NOTHING was changed in the
+    // form since editProject() pre-filled it, reuse the original phase
+    // object exactly — preserving weeklyHours/categoryName/precise dates —
+    // instead of rebuilding a flat-hours version and silently losing them.
+    const snap = editingPhaseSnapshots[id];
+    const unchanged = snap && unit === 'weeks' &&
+      snap.team === team && snap.hours === hoursRaw &&
+      snap.durWeeks === durRaw && snap.offset === offRaw;
+    if (unchanged) {
+      phases.push({ ...snap.ph, id });
+      return;
+    }
+
+    const hours=parseFloat(hoursRaw||0);
+    const dur=parseFloat(durRaw||1);
     const durWeeks=unit==='days'?dur/5:dur;
     const weeksSpan=[];
     let cur=new Date(pStarts[id].ms);
@@ -1877,6 +1900,7 @@ function addProject(){
     phases.push({id,team,hours,weeksSpan,startMs:pStarts[id].ms,durWeeks});
   });
   forecastProjects.push({id:Date.now(),name,startDate,phases});
+  editingPhaseSnapshots = {};
   document.getElementById('proj-name').value='';
   document.getElementById('phase-list').innerHTML='';
   phaseCounter=0;
@@ -1895,6 +1919,7 @@ function editProject(id) {
   // Clear existing phases
   document.getElementById('phase-list').innerHTML = '';
   phaseCounter = 0;
+  editingPhaseSnapshots = {};
   // Remove the project from the list (will be re-added on submit)
   forecastProjects = forecastProjects.filter(p => p.id !== id);
   renderProjectList();
@@ -1916,12 +1941,25 @@ function editProject(id) {
     if (hoursFld) hoursFld.value = ph.hours;
     if (durFld)   durFld.value   = ph.durWeeks || Math.ceil(ph.weeksSpan?.length || 4);
     if (unitSel)  unitSel.value  = 'weeks';
+    let offsetVal = 0;
     if (offFld) {
       // Calculate offset in weeks from project start
       const projMs = new Date(proj.startDate).getTime();
       const phMs   = ph.startMs || projMs;
-      const diffWeeks = Math.round((phMs - projMs) / (7*24*3600*1000));
-      offFld.value = diffWeeks;
+      offsetVal = Math.round((phMs - projMs) / (7*24*3600*1000));
+      offFld.value = offsetVal;
+    }
+    // Imported phases carry precise per-week hours (weeklyHours) that a
+    // flat "Hrs/Week" + "Duration" form can't represent. Snapshot the
+    // values we just pre-filled so addProject() can tell whether the user
+    // actually changed anything for this phase — if not, reuse the
+    // original phase object exactly instead of rebuilding it flat and
+    // silently losing weeklyHours/categoryName.
+    if (ph.weeklyHours) {
+      editingPhaseSnapshots[pid] = {
+        team: ph.team, hours: String(ph.hours), durWeeks: String(durFld?.value ?? ''),
+        offset: String(offsetVal), ph,
+      };
     }
   });
   // Scroll to form
