@@ -1308,10 +1308,33 @@ function runXmlMappingEngine(xmlText, fileName) {
     return [...root.getElementsByTagName(tag)];
   }
 
+  // ── Resources & Assignments ─────────────────────────────────────────────
+  // Re-introduced for one purpose only: filtering which child tasks count
+  // toward a category's date aggregation (see hasUsableResource() below).
+  // Team ownership is still decided PURELY by the bracket-category rule —
+  // resource names are never used to infer or override a team.
+  const resourceNodes = getAllByTag(doc, 'Resource');
+  const resourceNames = {}; // uid -> name
+  for (const r of resourceNodes) {
+    const uid  = get(r, 'UID');
+    const name = get(r, 'Name');
+    if (uid) resourceNames[uid] = name;
+  }
+  const assignmentNodes = getAllByTag(doc, 'Assignment');
+  const taskResourceNames = {}; // task uid -> [resource names]
+  for (const a of assignmentNodes) {
+    const tuid = get(a, 'TaskUID');
+    const ruid = get(a, 'ResourceUID');
+    if (!tuid || !ruid) continue;
+    // "-65535" is MS Project's sentinel for "no real resource assigned" —
+    // an assignment row can exist but point at nothing meaningful.
+    if (ruid === '-65535') continue;
+    const rname = resourceNames[ruid];
+    if (!rname) continue;
+    (taskResourceNames[tuid] = taskResourceNames[tuid] || []).push(rname);
+  }
+
   // ── Tasks ─────────────────────────────────────────────────────────────────
-  // NOTE: Resources/Assignments are intentionally NOT parsed here — team
-  // ownership is decided purely by the bracket-category rule below, never by
-  // resource names or task-name keywords (see safeguards).
   const taskNodes = getAllByTag(doc, 'Task');
 
   const allTasks = [];
@@ -1322,13 +1345,27 @@ function runXmlMappingEngine(xmlText, fileName) {
     const summary  = get(t, 'Summary') === '1' || get(t, 'Summary').toLowerCase() === 'true';
     const start    = get(t, 'Start').slice(0, 10);
     const finish   = get(t, 'Finish').slice(0, 10);
+    const resources = taskResourceNames[uid] || [];
 
     if (!name || uid === '0') continue;
-    allTasks.push({ uid, name, outline, summary, start, finish });
+    allTasks.push({ uid, name, outline, summary, start, finish, resources });
   }
 
   if (allTasks.length === 0) {
     return { ok: false, error: 'No tasks found in XML. Check the file exported correctly.' };
+  }
+
+  // A child task counts toward its category's dates only if it has at least
+  // one resource assigned that ISN'T a customer/client placeholder. Tasks
+  // with no resource at all (including MS Project's "-65535" no-resource
+  // sentinel, already filtered out above) or with ONLY a customer-labeled
+  // resource are customer-owned gates/inputs, not real internal work, and
+  // are excluded entirely — not even as a Finish-substituted point.
+  function isCustomerResource(name) { return /customer/i.test(name || ''); }
+  function hasUsableResource(t) {
+    const res = t.resources || [];
+    if (!res.length) return false;
+    return res.some(r => !isCustomerResource(r));
   }
 
   // Sanity check: duplicate UIDs mean tasks are being read more than once
@@ -1488,6 +1525,32 @@ function runXmlMappingEngine(xmlText, fileName) {
     return count;
   }
 
+  // Business hours PER CALENDAR WEEK within a continuous [start, finish]
+  // range — 8 hours per weekday actually covered by the range, so a week
+  // where the task only touches 3 working days (e.g. it starts on a
+  // Thursday) shows 24h, not a flat 40h. Because a "segment" is by
+  // definition gap-free (a real gap is exactly what triggers a split into
+  // separate segments), simply walking every weekday in [start, finish] and
+  // bucketing by ISO week naturally produces the right partial-week
+  // figures without needing to look at individual child tasks at all.
+  function computeWeeklyHours(start, finish) {
+    const weeklyHours = {};
+    const weekOrder = [];
+    if (!start || !finish) return { weeklyHours, weekOrder };
+    const cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+    const end = new Date(Date.UTC(finish.getUTCFullYear(), finish.getUTCMonth(), finish.getUTCDate()));
+    while (cur <= end) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        const label = toWeekLabel(cur);
+        if (!(label in weeklyHours)) weekOrder.push(label);
+        weeklyHours[label] = (weeklyHours[label] || 0) + 8;
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return { weeklyHours, weekOrder };
+  }
+
   let order = 0;
   for (const t of allTasks) {
     order++;
@@ -1517,25 +1580,33 @@ function runXmlMappingEngine(xmlText, fileName) {
     }
 
     if (stack.length) {
-      foldInto(stack[stack.length - 1], t);
-      const parsedStart = toDate(t.start);
-      const rawStartInvalid = t.start && !parsedStart;
-      const implausible = t.start && parsedStart && !isPlausibleDate(parsedStart);
-      const parsedFinish = toDate(t.finish);
-      const finishImplausible = t.finish && parsedFinish && !isPlausibleDate(parsedFinish);
-      if (finishImplausible) {
-        const daysOff = Math.round((projectStart - parsedFinish) / 86400000);
-        row.action = `⚠⚠ Finish "${t.finish}" is ${daysOff} days before the project's own start too — this child has NO trustworthy date at all and was DROPPED (does not fold into "${stack[stack.length-1].name}")`;
-        row.invalidStart = true;
-      } else if (implausible) {
-        const daysOff = Math.round((projectStart - parsedStart) / 86400000);
-        row.action = `⚠ Start "${t.start}" is ${daysOff} days before the project's own start — treated as a stale placeholder (used Finish instead), folds into "${stack[stack.length-1].name}"`;
-        row.invalidStart = true;
-      } else if (rawStartInvalid) {
-        row.action = `⚠ Start value "${t.start}" doesn't parse as a date — treated as no-Start (used Finish instead), folds into "${stack[stack.length-1].name}"`;
+      if (!hasUsableResource(t)) {
+        const res = (t.resources || []).join(', ');
+        row.action = res
+          ? `⊘ Excluded — only customer-labeled resource(s) (${res}), no internal work counted — does not fold into "${stack[stack.length-1].name}"`
+          : `⊘ Excluded — no resource assigned — does not fold into "${stack[stack.length-1].name}"`;
         row.invalidStart = true;
       } else {
-        row.action = `${t.start ? 'Start' : 'Finish'} (${t.start || t.finish || '—'}) folds into "${stack[stack.length-1].name}"`;
+        foldInto(stack[stack.length - 1], t);
+        const parsedStart = toDate(t.start);
+        const rawStartInvalid = t.start && !parsedStart;
+        const implausible = t.start && parsedStart && !isPlausibleDate(parsedStart);
+        const parsedFinish = toDate(t.finish);
+        const finishImplausible = t.finish && parsedFinish && !isPlausibleDate(parsedFinish);
+        if (finishImplausible) {
+          const daysOff = Math.round((projectStart - parsedFinish) / 86400000);
+          row.action = `⚠⚠ Finish "${t.finish}" is ${daysOff} days before the project's own start too — this child has NO trustworthy date at all and was DROPPED (does not fold into "${stack[stack.length-1].name}")`;
+          row.invalidStart = true;
+        } else if (implausible) {
+          const daysOff = Math.round((projectStart - parsedStart) / 86400000);
+          row.action = `⚠ Start "${t.start}" is ${daysOff} days before the project's own start — treated as a stale placeholder (used Finish instead), folds into "${stack[stack.length-1].name}"`;
+          row.invalidStart = true;
+        } else if (rawStartInvalid) {
+          row.action = `⚠ Start value "${t.start}" doesn't parse as a date — treated as no-Start (used Finish instead), folds into "${stack[stack.length-1].name}"`;
+          row.invalidStart = true;
+        } else {
+          row.action = `${t.start ? 'Start' : 'Finish'} (${t.start || t.finish || '—'}) folds into "${stack[stack.length-1].name}"`;
+        }
       }
       row.foldTarget = stack[stack.length-1].name;
     }
@@ -1594,7 +1665,7 @@ function runXmlMappingEngine(xmlText, fileName) {
 
   return {
     ok: true, allTasks, categories, trace, unmappedBrackets, unbracketedSummaries,
-    dupeUids, projectStart, businessDaysBetween,
+    dupeUids, projectStart, businessDaysBetween, computeWeeklyHours,
   };
 }
 
@@ -1605,7 +1676,7 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     statusEl.textContent = '✗ ' + result.error;
     return;
   }
-  const { categories, businessDaysBetween } = result;
+  const { categories, businessDaysBetween, computeWeeklyHours } = result;
 
   window.lastXmlMappingValidation = categories.map(c => ({
     category: c.name,
@@ -1625,14 +1696,15 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     phases:    mappedCategories
       .sort((a, b) => a.start - b.start)
       .map((c, i) => {
-        const durDays   = Math.max(1, businessDaysBetween(c.start, c.finish));
-        const durWeeks  = Math.max(1, Math.ceil(durDays / 5)); // 5 business days per week
-        const startMs   = c.start.getTime();
-        const weeksSpan = [];
-        for (let w = 0; w < durWeeks; w++) {
-          weeksSpan.push(toWeekLabel(new Date(startMs + w * 7 * 24 * 3600 * 1000)));
-        }
-        return { id: String(i + 1), team: c.team, hours: 40, durWeeks, weeksSpan, startMs, categoryName: c.name };
+        // Real per-week hours (e.g. 24h for a 3-working-day week), not a
+        // flat 40h assumed for every week the phase touches.
+        const { weeklyHours, weekOrder } = computeWeeklyHours(c.start, c.finish);
+        const startMs = c.start.getTime();
+        return {
+          id: String(i + 1), team: c.team, hours: 40, // flat fallback, only used if manually re-edited
+          durWeeks: weekOrder.length, weeksSpan: weekOrder, weeklyHours,
+          startMs, categoryName: c.name,
+        };
       }),
   };
 
@@ -1877,6 +1949,15 @@ function applyAddPerson(){
 }
 function clearAddPerson(){addPersonForecast=null;document.getElementById('addperson-status').textContent='';renderScenario();}
 
+// Hours a phase contributes in a specific week — uses the real per-week
+// breakdown (weeklyHours) when present (XML-imported phases with partial
+// weeks), or falls back to the flat hours/week value for manually-added
+// phases that don't have one.
+function hoursForWeek(ph, week) {
+  if (ph.weeklyHours) return ph.weeklyHours[week] || 0;
+  return ph.weeksSpan.includes(week) ? (ph.hours || 0) : 0;
+}
+
 function renderGantt(){
   const c=document.getElementById('gantt-container');
   if(!forecastProjects.length){c.innerHTML='<div class="empty">Add a project first.</div>';return;}
@@ -1894,7 +1975,8 @@ function renderGantt(){
       h+=`<tr><td style="padding:4px 10px;font-size:11px;color:var(--muted);white-space:nowrap">&nbsp;&nbsp;${phaseTeamLabel(ph)}</td>`;
       gw.forEach(w=>{
         const a=ph.weeksSpan.includes(w);
-        h+=`<td style="height:26px;border-radius:4px;background:${a?col+'44':'transparent'};border:1px solid ${a?col:'transparent'};text-align:center">${a?`<span style="font-size:9px;color:${col}">${ph.hours}h</span>`:''}</td>`;
+        const wh=hoursForWeek(ph,w);
+        h+=`<td style="height:26px;border-radius:4px;background:${a?col+'44':'transparent'};border:1px solid ${a?col:'transparent'};text-align:center">${a?`<span style="font-size:9px;color:${col}">${wh}h</span>`:''}</td>`;
       });
       h+='</tr>';
     });
@@ -1916,7 +1998,7 @@ function renderScenario(){
   for(const r of ft){if(baseline[r.team]?.[r.week]!==undefined){baseline[r.team][r.week].avail+=r.available_hours;baseline[r.team][r.week].util+=r.utilized_hours;}}
   if(addPersonForecast){const{team,count,hoursPerWeek}=addPersonForecast;for(const w of weeks)if(baseline[team]?.[w])baseline[team][w].avail+=count*hoursPerWeek;}
   const fl={};
-  for(const proj of forecastProjects)for(const ph of proj.phases){if(!fl[ph.team])fl[ph.team]={};for(const w of ph.weeksSpan)fl[ph.team][w]=(fl[ph.team][w]||0)+ph.hours;}
+  for(const proj of forecastProjects)for(const ph of proj.phases){if(!fl[ph.team])fl[ph.team]={};for(const w of ph.weeksSpan)fl[ph.team][w]=(fl[ph.team][w]||0)+hoursForWeek(ph,w);}
   if(scenarioViewMode==='gantt'){renderGantt();}
   const st=document.getElementById('scenario-team-select').value||ALL_TEAMS[0];
   const bp=weeks.map(w=>{const d=baseline[st]?.[w];return d&&d.avail>0?+(d.util/d.avail*100).toFixed(1):null;});
