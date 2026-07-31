@@ -144,7 +144,31 @@
   .ai-msg-user .ai-msg-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:3px}
   .ai-msg-assistant .ai-msg-bubble{background:var(--surface2);border:1px solid var(--border);border-bottom-left-radius:3px;color:var(--text)}
   @keyframes blink{0%,100%{opacity:.3}50%{opacity:1}}
-  .ai-typing{letter-spacing:4px;animation:blink 1.2s infinite}
+  .ai-typing{letter-spacing:4px;animation:blink 1.2s infinite}  /* ── Mapping Debugger (hidden dev page) ─────────────────────────────────── */
+  #page-mapdebug{font-family:'DM Mono','Courier New',monospace;font-size:13px}
+  #page-mapdebug h2{font-size:14px;margin:24px 0 10px;color:var(--accent);font-family:'Syne',sans-serif}
+  #page-mapdebug .md-sub{color:var(--muted);margin-bottom:16px}
+  #page-mapdebug .md-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+  #page-mapdebug .md-drop{border:2px dashed var(--border);border-radius:8px;padding:26px;text-align:center;cursor:pointer}
+  #page-mapdebug .md-drop:hover{border-color:var(--accent)}
+  #page-mapdebug .md-drop.drag{border-color:var(--green);background:rgba(34,197,94,0.06)}
+  #page-mapdebug table{width:100%;border-collapse:collapse;font-size:12px}
+  #page-mapdebug th,#page-mapdebug td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  #page-mapdebug th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--surface)}
+  #page-mapdebug tr.md-opens{background:rgba(34,197,94,0.08)}
+  #page-mapdebug tr.md-closes{background:rgba(239,68,68,0.08)}
+  #page-mapdebug tr.md-fold{background:rgba(79,142,247,0.05)}
+  #page-mapdebug tr.md-skip{opacity:0.45}
+  #page-mapdebug .md-pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px}
+  #page-mapdebug .md-pill.ok{background:rgba(34,197,94,0.15);color:var(--green)}
+  #page-mapdebug .md-pill.warn{background:rgba(245,158,11,0.15);color:var(--yellow)}
+  #page-mapdebug .md-pill.none{background:rgba(107,114,128,0.15);color:var(--muted)}
+  #page-mapdebug .md-scroll{max-height:440px;overflow:auto;border:1px solid var(--border);border-radius:6px}
+  #page-mapdebug .md-stat{display:inline-block;margin-right:24px}
+  #page-mapdebug .md-stat b{font-size:20px;display:block;font-family:'Syne',sans-serif}
+  #page-mapdebug code{background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px}
+  .md-hidden-trigger{position:fixed;bottom:6px;right:8px;font-size:10px;color:var(--border);cursor:pointer;z-index:200;user-select:none;letter-spacing:.05em}
+  .md-hidden-trigger:hover{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -430,8 +454,76 @@
   </div>
 </div>
 
+<!-- ── Hidden Mapping Debugger page ──────────────────────────────────────────
+     Not linked in the main nav-tabs bar — reached only via the small "debug"
+     link in the bottom-right corner, or by calling showPage('mapdebug') from
+     the console. Uses the exact same runXmlMappingEngine() as the real
+     "Import XML" flow in Scenario Planner, so what you see here is
+     guaranteed identical to what actually gets imported — no more drift
+     between a separate debugger tool and the dashboard's own logic. -->
+<div class="page" id="page-mapdebug">
+  <div class="page-header">
+    <div>
+      <div class="page-title">🔍 Mapping Debugger</div>
+      <div class="page-subtitle">Traces the XML→team mapping algorithm step by step — uses the exact same engine as the real import</div>
+    </div>
+  </div>
 
+  <div class="md-panel">
+    <div class="md-drop" id="mapdbg-drop">
+      <div id="mapdbg-drop-label">Drop your MS Project XML export here, or click to choose a file</div>
+      <input type="file" id="mapdbg-file-input" accept=".xml" style="display:none">
+    </div>
+  </div>
 
+  <div id="mapdbg-results" style="display:none">
+
+    <div class="md-panel" id="mapdbg-dupe-banner" style="display:none;border-color:var(--red);color:var(--red)"></div>
+
+    <div class="md-panel">
+      <h2 style="margin-top:0">Summary</h2>
+      <div class="md-stat"><b id="mapdbg-stat-total">0</b><span class="md-sub">total tasks</span></div>
+      <div class="md-stat"><b id="mapdbg-stat-summary">0</b><span class="md-sub">summary tasks</span></div>
+      <div class="md-stat"><b id="mapdbg-stat-bracketed">0</b><span class="md-sub">bracketed summaries</span></div>
+      <div class="md-stat"><b id="mapdbg-stat-mapped">0</b><span class="md-sub">mapped segments</span></div>
+      <div class="md-stat"><b id="mapdbg-stat-unmapped">0</b><span class="md-sub">unmapped brackets</span></div>
+    </div>
+
+    <div class="md-panel" id="mapdbg-unmapped-panel" style="display:none">
+      <h2 style="margin-top:0;color:var(--yellow)">⚠ Bracket text found that doesn't match the mapping table</h2>
+      <div class="md-sub">A bracket exists but its exact text isn't a key in <code>CATEGORY_TEAM_MAP</code>.</div>
+      <div class="md-scroll"><table id="mapdbg-unmapped-table"><thead><tr><th>Task Name</th><th>Bracket text found</th><th>Outline</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="md-panel" id="mapdbg-unbracketed-panel" style="display:none">
+      <h2 style="margin-top:0;color:var(--accent)">Summary tasks with NO brackets at all</h2>
+      <div class="md-sub">These never open a category by design (e.g. "Procurement", "Launch Date").</div>
+      <div class="md-scroll"><table id="mapdbg-unbracketed-table"><thead><tr><th>Task Name</th><th>Outline</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="md-panel">
+      <h2 style="margin-top:0">Final mapped categories (what gets imported as phases)</h2>
+      <div class="md-sub" style="margin-bottom:8px">One row per contiguous date cluster. A category splits into segments when its children's dates have a real gap — hover the "Children" count for member task names.</div>
+      <div class="md-scroll"><table id="mapdbg-categories-table">
+        <thead><tr><th>Category Name</th><th>Mapped Team</th><th>Start</th><th>Finish</th><th>Duration</th><th>Children</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="md-panel">
+      <h2 style="margin-top:0">Full task-by-task trace</h2>
+      <div class="md-sub">Green = opens a new category · Red = closes a category / dropped or stale-Start / implausible-Finish · Blue = folds into the currently-open category · Dim = skipped (noise filter)</div>
+      <div class="md-scroll"><table id="mapdbg-trace-table">
+        <thead><tr><th>#</th><th>Outline</th><th>Summary?</th><th>Task Name</th><th>Bracket</th><th>Action</th><th>Start</th><th>Finish</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Tiny, unobtrusive trigger — not in the main nav bar on purpose -->
+<div class="md-hidden-trigger" onclick="showPage('mapdebug')" title="Mapping Debugger (dev tool)">debug</div>
 <!-- SETTINGS PANEL -->
 <div class="settings-overlay" id="settings-overlay" onclick="toggleSettings()"></div>
 <div class="settings-panel" id="settings-panel">
@@ -474,6 +566,13 @@
     <div class="settings-row">
       <div><div class="settings-row-label">Include Staff</div></div>
       <label class="toggle"><input type="checkbox" id="s-staff" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Display</div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Show exact dates instead of week numbers</div><div class="settings-row-desc">Applies to the Scenario Planner Gantt and phase editor — e.g. "04 Aug 2026" instead of "2026 W32"</div></div>
+      <label class="toggle"><input type="checkbox" id="s-showDates" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
   <div class="settings-note">Contractor detection requires Resource Guru resource types to be configured. Changes apply instantly across all tabs.</div>
@@ -545,7 +644,7 @@ let scenarioViewMode = 'utilisation';
 let phaseCounter = 0;
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
@@ -569,6 +668,7 @@ function applySettings() {
     directors:   document.getElementById('s-directors').checked,
     managers:    document.getElementById('s-managers').checked,
     staff:       document.getElementById('s-staff').checked,
+    showDates:   document.getElementById('s-showDates').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
@@ -698,6 +798,127 @@ function showPage(p, el) {
   saveState();
 }
 
+// ── Mapping Debugger page (hidden dev tool) ───────────────────────────────────
+// Renders using runXmlMappingEngine() — the SAME engine parseMSProjectXml
+// uses for real imports — so this view can never drift out of sync with
+// what actually happens on import.
+(function initMappingDebugger() {
+  const drop = document.getElementById('mapdbg-drop');
+  const fileInput = document.getElementById('mapdbg-file-input');
+  if (!drop || !fileInput) return; // page not present in this build
+
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('drag');
+    const f = e.dataTransfer.files[0];
+    if (f) mapdbgHandleFile(f);
+  });
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) mapdbgHandleFile(f);
+  });
+})();
+
+async function mapdbgHandleFile(file) {
+  const label = document.getElementById('mapdbg-drop-label');
+  label.textContent = 'Loading ' + file.name + ' ...';
+  const text = await file.text();
+  const result = runXmlMappingEngine(text, file.name);
+  if (!result.ok) {
+    label.textContent = 'Error: ' + result.error;
+    document.getElementById('mapdbg-results').style.display = 'none';
+    return;
+  }
+  label.textContent = 'Loaded: ' + file.name + ' — drop another file to replace';
+  mapdbgRenderResults(result, file.name);
+}
+
+function mapdbgRenderResults(result, fileName) {
+  const { allTasks, categories, trace, unmappedBrackets, unbracketedSummaries, dupeUids } = result;
+  document.getElementById('mapdbg-results').style.display = 'block';
+
+  const dupeBanner = document.getElementById('mapdbg-dupe-banner');
+  if (dupeUids && dupeUids.length) {
+    dupeBanner.style.display = 'block';
+    dupeBanner.textContent = `⚠ ${dupeUids.length} task UID(s) appear more than once in the parsed list (e.g. UID ${dupeUids[0][0]} × ${dupeUids[0][1]}) — tasks are being read multiple times.`;
+  } else {
+    dupeBanner.style.display = 'none';
+  }
+
+  const summaryCount = allTasks.filter(t => t.summary).length;
+  const bracketedCount = summaryCount - unbracketedSummaries.length;
+  document.getElementById('mapdbg-stat-total').textContent = allTasks.length;
+  document.getElementById('mapdbg-stat-summary').textContent = summaryCount;
+  document.getElementById('mapdbg-stat-bracketed').textContent = bracketedCount;
+  document.getElementById('mapdbg-stat-mapped').textContent = categories.length;
+  document.getElementById('mapdbg-stat-unmapped').textContent = unmappedBrackets.length;
+
+  const unmappedPanel = document.getElementById('mapdbg-unmapped-panel');
+  const unmappedTbody = document.querySelector('#mapdbg-unmapped-table tbody');
+  if (unmappedBrackets.length) {
+    unmappedPanel.style.display = 'block';
+    unmappedTbody.innerHTML = unmappedBrackets.map(u => `
+      <tr><td>${mapdbgEsc(u.name)}</td><td style="color:var(--yellow)">(${mapdbgEsc(u.bracket)})</td><td>${u.outline}</td></tr>
+    `).join('');
+  } else {
+    unmappedPanel.style.display = 'none';
+  }
+
+  const unbrPanel = document.getElementById('mapdbg-unbracketed-panel');
+  const unbrTbody = document.querySelector('#mapdbg-unbracketed-table tbody');
+  if (unbracketedSummaries.length) {
+    unbrPanel.style.display = 'block';
+    unbrTbody.innerHTML = unbracketedSummaries.map(u => `
+      <tr><td>${mapdbgEsc(u.name)}</td><td>${u.outline}</td></tr>
+    `).join('');
+  } else {
+    unbrPanel.style.display = 'none';
+  }
+
+  const catTbody = document.querySelector('#mapdbg-categories-table tbody');
+  catTbody.innerHTML = categories.map(c => {
+    const dur = result.businessDaysBetween(c.start, c.finish);
+    const members = (c.members || []).join(', ');
+    return `<tr>
+      <td>${mapdbgEsc(c.name)}${c.split ? ' <span class="md-pill warn">split</span>' : ''}</td>
+      <td><span class="md-pill ok">${mapdbgEsc(c.team)}</span></td>
+      <td>${formatDateShort(c.start)}</td>
+      <td>${formatDateShort(c.finish)}</td>
+      <td>${dur != null ? dur + ' business days' : '—'}</td>
+      <td title="${mapdbgEsc(members)}">${c.count}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="color:var(--muted)">No categories mapped — check the unmapped-bracket panel above.</td></tr>';
+
+  const traceTbody = document.querySelector('#mapdbg-trace-table tbody');
+  traceTbody.innerHTML = trace.map(row => {
+    if (row.isCloseEvent) {
+      return `<tr class="md-closes"><td>${row.order}</td><td colspan="6"><b>⤴ ${mapdbgEsc(row.action)}</b></td><td></td></tr>`;
+    }
+    let cls = '';
+    if (row.skip) cls = 'md-skip';
+    else if (row.invalidStart) cls = 'md-closes';
+    else if (row.opens) cls = 'md-opens';
+    else if (row.unmapped) cls = 'md-closes';
+    else if (row.foldTarget) cls = 'md-fold';
+    return `<tr class="${cls}">
+      <td>${row.order}</td>
+      <td>${row.outline}</td>
+      <td>${row.summary ? '✓' : ''}</td>
+      <td>${mapdbgEsc(row.name)}</td>
+      <td>${row.bracket ? '(' + mapdbgEsc(row.bracket) + ')' : ''}</td>
+      <td>${mapdbgEsc(row.action)}</td>
+      <td>${row.start || ''}</td>
+      <td>${row.finish || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function mapdbgEsc(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
 // ── View mode ─────────────────────────────────────────────────────────────────
 function setViewMode(m) {
   viewMode = m;
@@ -782,7 +1003,7 @@ function renderTeamView(tf,weeks){
     const wd=weeks.map(w=>{const d=data[t][w];a+=d.avail;u+=d.util;return d.avail>0?+(d.util/d.avail*100).toFixed(1):0;});
     return{team:t,avg:a>0?u/a*100:0,avail:a,util:u,weekData:wd};
   }).sort((a,b)=>b.avg-a.avg);
-  document.getElementById('table-head').innerHTML=`<tr><th>Team</th>${weeks.map(w=>`<th>${w.replace(/\d+ /,'')}</th>`).join('')}<th>Avg%</th><th>Status</th></tr>`;
+  document.getElementById('table-head').innerHTML=`<tr><th>Team</th>${weeks.map(w=>`<th>${weekColumnLabel(w)}</th>`).join('')}<th>Avg%</th><th>Status</th></tr>`;
   renderTeamTableBody(weeks);
 }
 
@@ -832,7 +1053,7 @@ function renderHeatmap(){
   // Team label column is fixed-width, data columns are compact — cells start flush from left
   let h=`<table class="heatmap-table" style="width:auto;table-layout:fixed"><thead><tr>` +
         `<th style="width:200px;min-width:200px;text-align:left;padding:6px 12px 6px 4px"></th>` +
-        weeks.map(w=>`<th style="width:54px;min-width:54px;text-align:center;padding:4px 2px">${w.replace(/\d+ /,'')}</th>`).join('') +
+        weeks.map(w=>`<th style="width:54px;min-width:54px;text-align:center;padding:4px 2px">${weekColumnLabel(w)}</th>`).join('') +
         `</tr></thead><tbody>`;
   for(const t of teams){
     h+=`<tr><td class="hm-team" style="width:200px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:12px">${t}</td>`;
@@ -1040,21 +1261,21 @@ function categoryToTeam(taskName) {
   return CATEGORY_TEAM_MAP[bracket] || null;
 }
 
-function parseMSProjectXml(xmlText, fileName, statusEl) {
+// ── Shared XML mapping engine (single source of truth) ────────────────────────
+// Used by BOTH the "Import XML" flow in Add Project below AND the hidden
+// Mapping Debugger page. Previously this logic was duplicated across the
+// dashboard and a separate debugger tool, which meant every bug fix had to be
+// applied twice and could drift out of sync — this consolidates it into one
+// function so there's only one place to fix, ever.
+function runXmlMappingEngine(xmlText, fileName) {
   let doc;
   try {
     doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-  } catch(e) {
-    statusEl.style.color = 'var(--red)';
-    statusEl.textContent = '✗ Could not parse XML: ' + e.message;
-    return;
+  } catch (e) {
+    return { ok: false, error: 'Could not parse XML: ' + e.message };
   }
-
-  const parseErr = doc.querySelector('parsererror');
-  if (parseErr) {
-    statusEl.style.color = 'var(--red)';
-    statusEl.textContent = '✗ Invalid XML file. Make sure you exported via File → Save As → XML in MS Project.';
-    return;
+  if (doc.querySelector('parsererror')) {
+    return { ok: false, error: 'Invalid XML file. Make sure you exported via File → Save As → XML in MS Project.' };
   }
 
   // MS Project XML uses either namespaced or plain tags
@@ -1094,9 +1315,17 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
   }
 
   if (allTasks.length === 0) {
-    statusEl.style.color = 'var(--red)';
-    statusEl.textContent = '✗ No tasks found in XML. Check the file exported correctly.';
-    return;
+    return { ok: false, error: 'No tasks found in XML. Check the file exported correctly.' };
+  }
+
+  // Sanity check: duplicate UIDs mean tasks are being read more than once
+  // (the exact bug this caught once already — combining namespaced + plain
+  // tag lookups when both matched the same nodes).
+  const uidCounts = {};
+  allTasks.forEach(t => { uidCounts[t.uid] = (uidCounts[t.uid] || 0) + 1; });
+  const dupeUids = Object.entries(uidCounts).filter(([,c]) => c > 1);
+  if (dupeUids.length) {
+    console.warn('[XML Mapping] Duplicate task UIDs detected — tasks are being read more than once:', dupeUids);
   }
 
   // Hardened: rejects unparseable/placeholder values (e.g. "NA") instead of
@@ -1107,7 +1336,7 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  // Reference point for detecting stale/placeholder Start values.
+  // Reference point for detecting stale/placeholder Start/Finish values.
   //
   // IMPORTANT: this must NOT be the top-level "Project: ..." row's own
   // Start field — that's a ROLLUP that MS Project sets to the EARLIEST
@@ -1151,40 +1380,32 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
   // Only category/header tasks with a bracket suffix — e.g. "(PLC)" —
   // determine team ownership (categoryToTeam()). Category Start/Finish are
   // computed PER CONTIGUOUS DATE CLUSTER of children, never one blind
-  // min/max span and never an all-or-nothing fallback — a single
-  // unreliable child must not block a category from splitting on a
-  // genuine gap elsewhere in its children.
+  // min/max span and never an all-or-nothing fallback.
   //
-  // Per child, the "effective start" used for clustering is:
-  //   - its real Start, IF that's trustworthy: parses as a real date AND is
-  //     plausible (not more than STALE_START_THRESHOLD_DAYS before the
-  //     project's own start — catches placeholder Start values that parse
-  //     fine but are a year or more stale).
-  //   - otherwise, its own Finish date, treated as a single-day point event.
+  // Per child, the "effective start" used for clustering is its real Start
+  // IF that's trustworthy (parses AND is plausible — see below), otherwise
+  // its own Finish, treated as a single-day point event. The plausibility
+  // check applies to BOTH Start and Finish: a task can have a genuinely
+  // wrong Finish too (seen in real data — a manually-typed date with a
+  // typo, Manual=1, with essentially unlimited slack, confirming it's a
+  // stray disconnected entry). If neither date is trustworthy, that child
+  // contributes nothing at all.
   //
   // Children are sorted by effective start and merged into clusters. The
   // gap check between one cluster's Finish and the next child's effective
-  // start has two modes, because a single fixed threshold can't handle
-  // both "don't split on an artifact gap from Finish-substituted points"
-  // and "do split on a real few-day gap between fully reliable dates" at
-  // once: if BOTH sides of a boundary have a reliable Start, a small strict
-  // threshold applies; if EITHER side is a Finish-substituted point, that
-  // boundary always merges, since the "gap" isn't trustworthy evidence of
-  // real separation.
+  // start has two modes: if BOTH sides of a boundary have a reliable Start,
+  // a small strict threshold applies; if EITHER side is a Finish-substituted
+  // point, that boundary always merges, since the "gap" isn't trustworthy
+  // evidence of real separation.
   // Duration is business days (Mon-Fri) between a segment's Start/Finish.
   // Child tasks are never individually remapped to a different team.
   const categories = [];   // finalized segments: { name, team, start, finish, count }
   const stack = [];        // open categories: { level, name, team, children, ownFinish }
   const GAP_MERGE_DAYS = 3; // only applies between two fully-reliable dates
+  const trace = [];
+  const unmappedBrackets = [];
+  const unbracketedSummaries = [];
 
-  // NOTE: this plausibility check applies to BOTH Start and Finish. Real
-  // data found: a task can have a genuinely wrong Finish too (not just
-  // Start) — e.g. a manually-typed date with a typo, sitting in the middle
-  // of an otherwise-correctly-dated project, with Manual=1 in the XML and
-  // essentially unlimited slack, confirming it's a stray, disconnected
-  // entry rather than real scheduling data. Finish was previously always
-  // trusted unconditionally — that let a single bad task (its category's
-  // only child) corrupt the whole category to a date a full year off.
   function isPlausibleDate(d) {
     if (!d) return false;
     if (!projectStart) return true; // no reference point available — trust whatever parses
@@ -1229,13 +1450,14 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     if (!cat.children.length) {
       // No usable children at all — fall back to the header's own Finish
       // so the category isn't dropped entirely.
-      return [{ name: cat.name, team: cat.team, start: cat.ownFinish, finish: cat.ownFinish, count: 0 }];
+      return [{ name: cat.name, team: cat.team, start: cat.ownFinish, finish: cat.ownFinish, count: 0, members: [] }];
     }
     const clusters = clusterChildren(cat.children);
     return clusters.map((cl, i) => ({
       name:  clusters.length > 1 ? `${cat.name} — Segment ${i + 1}` : cat.name,
       team:  cat.team,
-      start: cl.start, finish: cl.finish, count: cl.count,
+      start: cl.start, finish: cl.finish, count: cl.count, members: cl.members,
+      split: clusters.length > 1,
     }));
   }
   // Business days (Mon-Fri) between two dates, inclusive of both ends.
@@ -1253,39 +1475,94 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     return count;
   }
 
+  let order = 0;
   for (const t of allTasks) {
-    // Close any open categories BEFORE checking the noise filter — see note
-    // above. This must run unconditionally for every task's outline level.
+    order++;
+    const row = { order, outline: t.outline, summary: t.summary, name: t.name, start: t.start, finish: t.finish, action: '', bracket: '', skip: false };
+
+    // Close any open categories BEFORE checking the noise filter — this must
+    // run unconditionally for every task's outline level, even for a task
+    // we're about to skip as noise (e.g. "Quoted Leadtimes:-" sitting at the
+    // same level right after a real category — otherwise that category
+    // never closes and wrongly absorbs whatever comes next).
     while (stack.length && stack[stack.length - 1].level >= t.outline) {
       const closed = stack.pop();
-      categories.push(...finalizeCategory(closed));
+      const segments = finalizeCategory(closed);
+      categories.push(...segments);
+      trace.push({
+        order, isCloseEvent: true, name: '(closes)', closesName: closed.name,
+        action: `closes "${closed.name}" (${closed.team}) — ${segments.length} segment(s): ` +
+                segments.map(s => `${formatDateShort(s.start)}–${formatDateShort(s.finish)} (${s.count} children)`).join('; '),
+      });
     }
 
-    // Skip noise sections that aren't task data (payment terms, lead times)
-    if (/payment|quoted lead/i.test(t.name)) continue;
+    if (/payment|quoted lead/i.test(t.name)) {
+      row.action = 'skipped (noise filter)';
+      row.skip = true;
+      trace.push(row);
+      continue;
+    }
 
-    // Roll this task's effective date up into whichever category is open
-    if (stack.length) foldInto(stack[stack.length - 1], t);
+    if (stack.length) {
+      foldInto(stack[stack.length - 1], t);
+      const parsedStart = toDate(t.start);
+      const rawStartInvalid = t.start && !parsedStart;
+      const implausible = t.start && parsedStart && !isPlausibleDate(parsedStart);
+      const parsedFinish = toDate(t.finish);
+      const finishImplausible = t.finish && parsedFinish && !isPlausibleDate(parsedFinish);
+      if (finishImplausible) {
+        const daysOff = Math.round((projectStart - parsedFinish) / 86400000);
+        row.action = `⚠⚠ Finish "${t.finish}" is ${daysOff} days before the project's own start too — this child has NO trustworthy date at all and was DROPPED (does not fold into "${stack[stack.length-1].name}")`;
+        row.invalidStart = true;
+      } else if (implausible) {
+        const daysOff = Math.round((projectStart - parsedStart) / 86400000);
+        row.action = `⚠ Start "${t.start}" is ${daysOff} days before the project's own start — treated as a stale placeholder (used Finish instead), folds into "${stack[stack.length-1].name}"`;
+        row.invalidStart = true;
+      } else if (rawStartInvalid) {
+        row.action = `⚠ Start value "${t.start}" doesn't parse as a date — treated as no-Start (used Finish instead), folds into "${stack[stack.length-1].name}"`;
+        row.invalidStart = true;
+      } else {
+        row.action = `${t.start ? 'Start' : 'Finish'} (${t.start || t.finish || '—'}) folds into "${stack[stack.length-1].name}"`;
+      }
+      row.foldTarget = stack[stack.length-1].name;
+    }
 
-    // Does this task itself open a new mapped category?
-    // Rule: only bracketed category/header tasks determine team ownership.
-    // Un-bracketed headers (e.g. "Procurement", "Launch Date") do NOT open
-    // a category and are therefore never assigned a team via this path.
     if (t.summary) {
-      const team = categoryToTeam(t.name);
-      if (team) {
-        const cat = {
-          level: t.outline, name: t.name.replace(/:$/, '').trim(), team,
-          children: [], ownFinish: toDate(t.finish),
-        };
-        stack.push(cat); // children (folded above/below) populate start/finish, NOT the header itself
+      const bracket = extractCategoryBracket(t.name);
+      if (bracket) {
+        row.bracket = bracket;
+        const team = categoryToTeam(t.name);
+        if (team) {
+          const cat = {
+            level: t.outline, name: t.name.replace(/:$/, '').trim(), team,
+            children: [], ownFinish: toDate(t.finish),
+          };
+          stack.push(cat);
+          row.action = (row.action ? row.action + ' + ' : '') + `OPENS "${cat.name}" → ${team}`;
+          row.opens = true;
+        } else {
+          unmappedBrackets.push({ name: t.name, bracket, outline: t.outline });
+          row.action = (row.action ? row.action + ' + ' : '') + `bracket "(${bracket})" NOT in mapping table`;
+          row.unmapped = true;
+        }
+      } else {
+        unbracketedSummaries.push({ name: t.name, outline: t.outline });
+        if (!row.action) row.action = 'un-bracketed header — no team assigned';
       }
     }
+
+    if (!row.action) row.action = '(no open category — not counted anywhere)';
+    trace.push(row);
   }
   // flush anything left open at EOF
   while (stack.length) {
     const closed = stack.pop();
-    categories.push(...finalizeCategory(closed));
+    const segments = finalizeCategory(closed);
+    categories.push(...segments);
+    trace.push({
+      order: order + 1, isCloseEvent: true, name: '(closes)', closesName: closed.name,
+      action: `closes "${closed.name}" (${closed.team}) — end of file — ${segments.length} segment(s)`,
+    });
   }
 
   // ── Validation output (per spec) ───────────────────────────────────────────
@@ -1301,6 +1578,22 @@ function parseMSProjectXml(xmlText, fileName, statusEl) {
     );
   });
   console.groupEnd();
+
+  return {
+    ok: true, allTasks, categories, trace, unmappedBrackets, unbracketedSummaries,
+    dupeUids, projectStart, businessDaysBetween,
+  };
+}
+
+function parseMSProjectXml(xmlText, fileName, statusEl) {
+  const result = runXmlMappingEngine(xmlText, fileName);
+  if (!result.ok) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ ' + result.error;
+    return;
+  }
+  const { categories, businessDaysBetween } = result;
+
   window.lastXmlMappingValidation = categories.map(c => ({
     category: c.name,
     team: c.team,
@@ -1574,7 +1867,7 @@ function renderGantt(){
   const gw=[...aw].sort();
   const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399'];
   let h=`<table style="border-collapse:separate;border-spacing:2px;min-width:100%"><thead><tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);background:transparent;white-space:nowrap">Phase</th>`;
-  gw.forEach(w=>{h+=`<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:34px">${w.replace(/\d+ /,'')}</th>`;});
+  gw.forEach(w=>{h+=`<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:34px">${weekColumnLabel(w)}</th>`;});
   h+='</tr></thead><tbody>';
   forecastProjects.forEach((proj,pi)=>{
     h+=`<tr><td colspan="${gw.length+1}" style="padding:8px 10px 4px;font-size:12px;font-weight:700">${proj.name}</td></tr>`;
@@ -1612,7 +1905,7 @@ function renderScenario(){
   const fp=weeks.map(w=>{const d=baseline[st]?.[w];if(!d||d.avail===0)return null;const x=fl[st]?.[w]||0;return+((d.util+x)/d.avail*100).toFixed(1);});
   if(scenarioChart)scenarioChart.destroy();
   const ctx=document.getElementById('scenario-chart').getContext('2d');
-  scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>w.replace(/\d+ /,'')),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}});
+  scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>weekColumnLabel(w)),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}});
   const bn=[];
   for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;
         // Only show in bottleneck if this team has actual forecast load
@@ -1620,12 +1913,12 @@ function renderScenario(){
         const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>85)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
   let ah='';const crit={},warn={};
   for(const b of bn){if(b.projPct>95)(crit[b.team]=crit[b.team]||[]).push(b);else(warn[b.team]=warn[b.team]||[]).push(b);}
-  for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} wk(s): ${bs.map(b=>b.week.replace(/\d+ /,'')).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
-  for(const[t,bs]of Object.entries(warn))ah+=`<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} wk(s): ${bs.map(b=>b.week.replace(/\d+ /,'')).join(', ')}.</div></div></div>`;
+  for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
+  for(const[t,bs]of Object.entries(warn))ah+=`<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}.</div></div></div>`;
   document.getElementById('alert-container').innerHTML=bn.length?`<div class="alert-list">${ah}</div>`:(forecastProjects.length||addPersonForecast?'<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div></div></div></div>':'');
   const tbody=document.getElementById('bottleneck-body');
   if(!bn.length){tbody.innerHTML=`<tr><td colspan="6" class="empty">${forecastProjects.length||addPersonForecast?'No weeks exceed 85%.':'Add a project to see analysis.'}</td></tr>`;return;}
-  tbody.innerHTML=bn.sort((a,b)=>b.projPct-a.projPct).map(b=>`<tr><td style="font-weight:600">${b.team}</td><td class="mono">${b.week.replace(/\d+ /,'')}</td><td>${utilBar(b.basePct)}</td><td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td><td>${utilBar(b.projPct)}</td><td>${getBadge(b.projPct)}</td></tr>`).join('');
+  tbody.innerHTML=bn.sort((a,b)=>b.projPct-a.projPct).map(b=>`<tr><td style="font-weight:600">${b.team}</td><td class="mono">${weekColumnLabel(b.week)}</td><td>${utilBar(b.basePct)}</td><td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td><td>${utilBar(b.projPct)}</td><td>${getBadge(b.projPct)}</td></tr>`).join('');
 }
 
 // ── Chart helper ──────────────────────────────────────────────────────────────
@@ -1664,7 +1957,7 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
   }
   const chart = new Chart(ctx,{
     type:isBar?'bar':'line',
-    data:{labels:isBar?labels:labels.map(w=>w.replace(/\d+ /,'')),datasets},
+    data:{labels:isBar?labels:labels.map(w=>weekColumnLabel(w)),datasets},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
       plugins:{legend:{
         labels:{color:'#e8eaf0',font:{family:'Syne',size:11},boxWidth:12},
@@ -1742,6 +2035,18 @@ function weekRangeWithDates(fromLabel, toLabel) {
                  : (wa === wb ? `Week ${wa}` : `Weeks ${wa}-${wb}`);
   if (!a || !b) return weekPart;
   return `${weekPart} · ${formatDateShort(a.mon)} - ${formatDateShort(b.sun)}`;
+}
+
+// Compact label for chart ticks / table headers / bottleneck lists: shows
+// just the week number (e.g. "W32") by default, or the Monday date of that
+// week (e.g. "04 Aug") when SETTINGS.showDates is toggled on. Used anywhere
+// a week label was previously stripped down with `.replace(/\d+ /,'')`.
+function weekColumnLabel(w) {
+  if (SETTINGS && SETTINGS.showDates) {
+    const range = weekLabelToRange(w);
+    if (range) return formatDateShort(range.mon).replace(/ \d{4}$/, '');
+  }
+  return (w || '').replace(/\d+ /, '');
 }
 
 // ── AI panel ──────────────────────────────────────────────────────────────────
