@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -66,6 +66,39 @@ function isNonPerson(rtName) {
   return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
 }
 
+// ── Confirmed vs Tentative breakdown from real Bookings ──────────────────────
+// Resource Guru's Report endpoint only exposes "booked" (confirmed AND
+// tentative combined) and "waiting_list" (a DIFFERENT concept entirely —
+// overflow bookings that don't fit within availability due to a clash, not
+// tentative bookings). A booking can be flagged tentative and still fit
+// perfectly within a person's availability, in which case it's baked into
+// "booked" with no way to separate it out from that endpoint alone.
+//
+// To get a real split, we pull actual Bookings (which expose a per-booking
+// "tentative" flag) once for the whole date range, then bucket each day's
+// duration into the correct week, split by that flag. Waiting-list days
+// (duration.waiting === true) are excluded from both buckets here — they're
+// a separate concept from "tentative" and aren't what this toggle means.
+//
+// Returns: { "resourceId|weekLabel": { confirmedMins, tentativeMins } }
+function buildConfirmedTentativeBreakdown(bookings) {
+  const breakdown = {};
+  for (const b of bookings) {
+    const resId = b.resource_id;
+    if (resId == null) continue;
+    const isTentative = b.tentative === true;
+    for (const d of (b.durations || [])) {
+      if (d.waiting) continue; // waiting list ≠ tentative — excluded from this split
+      const wk = toWeekLabel(new Date(d.date));
+      const key = `${resId}|${wk}`;
+      if (!breakdown[key]) breakdown[key] = { confirmedMins: 0, tentativeMins: 0 };
+      if (isTentative) breakdown[key].tentativeMins += (d.duration || 0);
+      else              breakdown[key].confirmedMins += (d.duration || 0);
+    }
+  }
+  return breakdown;
+}
+
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
   console.log(`[Transform] Building data for ${weeks.length} weeks (${from} → ${to})`);
@@ -74,6 +107,7 @@ async function buildRawData(from, to) {
   const deptOptionLookup   = {}; // option_id(number) → department name
   const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
   let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
+  const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
 
   try {
     const [resources, resourceTypes] = await Promise.all([
@@ -105,11 +139,24 @@ async function buildRawData(from, to) {
           job_title:   r.job_title || '',
           rtName,
         };
+        if (r.id != null) resourceIdToName[r.id] = r.name;
       });
       console.log(`[Transform] Resource metadata: ${Object.keys(resourceMeta).length} resources`);
     }
   } catch (err) {
     console.warn('[Transform] Metadata fetch failed:', err.message);
+  }
+
+  // Fetch every Booking in the whole range ONCE (not per-week — much lighter
+  // on the API than a call per week), then bucket confirmed/tentative
+  // minutes per resource per week ourselves from each booking's durations.
+  let confirmedTentativeBreakdown = {};
+  try {
+    const bookings = await fetchBookings(from, to);
+    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings);
+    console.log(`[Transform] Confirmed/tentative breakdown built from ${bookings.length} bookings`);
+  } catch (err) {
+    console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative will read as 0):', err.message);
   }
 
   const teamsMap     = {};
@@ -163,9 +210,17 @@ async function buildRawData(from, to) {
       const seniority = resourceMeta[name]?.seniority || getSeniority(resolvedJobTitle);
 
       // ── Hours (RG reports in MINUTES) ───────────────────────────────────
-      const totalAvail     = +((r.availability || 0) / 60).toFixed(2);
-      const totalUtil      = +((r.booked       || 0) / 60).toFixed(2);
-      const totalTentative = +((r.waiting_list || 0) / 60).toFixed(2);
+      const totalAvail = +((r.availability || 0) / 60).toFixed(2);
+
+      // Confirmed / tentative split now comes from real Bookings data, not
+      // the Report endpoint's "booked" (which is confirmed+tentative
+      // combined) — see buildConfirmedTentativeBreakdown() above. Falls
+      // back to treating everything as confirmed (old behaviour) if the
+      // bookings fetch failed for some reason, so the dashboard still shows
+      // sensible totals rather than zeros.
+      const bd = confirmedTentativeBreakdown[`${r.id}|${wk.label}`];
+      const totalUtil      = bd ? +(bd.confirmedMins / 60).toFixed(2) : +((r.booked || 0) / 60).toFixed(2);
+      const totalTentative = bd ? +(bd.tentativeMins / 60).toFixed(2) : 0;
 
       // Split hours equally across departments if person has multiple
       const share = departments.length;
