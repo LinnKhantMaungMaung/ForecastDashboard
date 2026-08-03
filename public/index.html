@@ -1250,11 +1250,17 @@ function processAiMppTasks(tasks, fileName, statusEl) {
 // MS Project File → Save As → XML produces a standard schema we can parse
 // directly in the browser using the native DOMParser.
 
-// ── Category/team mapping (bracket-header rule) ─────────────────────────────
-// ONLY category/header tasks whose name contains a bracketed suffix like
-// "(Project Management)" determine team ownership. Task names or resource
-// assignments are never used to infer a team — per the safeguards below,
-// that produced unreliable mappings.
+// ── Category/team mapping (bracket-header rule, with a name-based fallback) ──
+// PRIMARY rule: a category/header task's bracket suffix — e.g.
+// "(Project Management)" — determines team ownership via CATEGORY_TEAM_MAP.
+//
+// FALLBACK rule: if there's no bracket, or its text isn't recognized, we
+// also try matching the task's own descriptive name (the part before the
+// bracket) against NAME_PREFIX_TEAM_MAP. This mirrors the EXACT SAME set of
+// categories already reachable via bracket today — it's a resilience net
+// for the case where a future export is missing the bracket suffix, not a
+// new/different mapping. It is NOT free-form keyword inference across
+// arbitrary task names — only these specific known category names match.
 const CATEGORY_TEAM_MAP = {
   'project management': 'Projects',
   'design':              'Design',
@@ -1262,6 +1268,23 @@ const CATEGORY_TEAM_MAP = {
   'panel build':         'Control Panels - Notts',
   'electrical install':  'Electrical Installation',
 };
+
+// Ordered so more specific prefixes are checked first where it matters.
+// Matched against the task's name with the bracket suffix and any trailing
+// colon stripped (e.g. "Documents: Inputs (Project Management)" → the
+// prefix-matching happens against "documents: inputs").
+const NAME_PREFIX_TEAM_MAP = [
+  { prefix: 'documents: input',      team: 'Projects' },               // "Documents: Inputs"
+  { prefix: 'upfront engineering',   team: 'Projects' },
+  { prefix: 'design: electrical',    team: 'Design' },
+  { prefix: 'design: software',      team: 'PLC' },
+  { prefix: 'build',                 team: 'Control Panels - Notts' },  // "Build:"
+  { prefix: 'configuration',         team: 'PLC' },
+  { prefix: 'install',               team: 'Electrical Installation' },
+  { prefix: 'commissioning',         team: 'PLC' },
+  { prefix: 'sat',                   team: 'PLC' },
+  { prefix: 'documents: output',     team: 'Projects' },                // "Documents: Outputs"
+];
 
 // Extract the LAST bracketed group in a task name, e.g.
 // "Design: Software (PLC)" → "plc". Returns null if no brackets present.
@@ -1271,13 +1294,37 @@ function extractCategoryBracket(taskName) {
   return matches[matches.length - 1][1].trim().toLowerCase();
 }
 
-// Resolve a task name to a dashboard team, ONLY via the bracket rule.
-// Tasks without brackets (e.g. "Procurement", "Launch Date") return null
-// and are therefore never used to determine team ownership.
+// The descriptive part of a category name, with the bracket suffix and any
+// trailing colon stripped, lowercased — e.g. "Documents: Inputs (Project
+// Management)" → "documents: inputs".
+function categoryNamePrefix(taskName) {
+  return (taskName || '')
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .replace(/:\s*$/, '')
+    .trim()
+    .toLowerCase();
+}
+
+// Resolve a task name to a dashboard team: bracket rule first, then the
+// name-based fallback above. Tasks that match neither (e.g. "Procurement",
+// "Launch Date") return null and are therefore never assigned a team.
 function categoryToTeam(taskName) {
   const bracket = extractCategoryBracket(taskName);
-  if (!bracket) return null;
-  return CATEGORY_TEAM_MAP[bracket] || null;
+  if (bracket && CATEGORY_TEAM_MAP[bracket]) return CATEGORY_TEAM_MAP[bracket];
+
+  const namePrefix = categoryNamePrefix(taskName);
+  function matchesPrefix(prefix) {
+    // Allow an optional trailing "s" (Input/Inputs, Output/Outputs), then
+    // require a real boundary (colon, space, or end of string) so "sat"
+    // doesn't match inside an unrelated word like "Saturday".
+    return namePrefix === prefix || namePrefix === prefix + 's' ||
+      namePrefix.startsWith(prefix + ':')  || namePrefix.startsWith(prefix + 's:') ||
+      namePrefix.startsWith(prefix + ' ')  || namePrefix.startsWith(prefix + 's ');
+  }
+  for (const { prefix, team } of NAME_PREFIX_TEAM_MAP) {
+    if (matchesPrefix(prefix)) return team;
+  }
+  return null;
 }
 
 // ── Shared XML mapping engine (single source of truth) ────────────────────────
@@ -1619,25 +1666,30 @@ function runXmlMappingEngine(xmlText, fileName) {
 
     if (t.summary) {
       const bracket = extractCategoryBracket(t.name);
-      if (bracket) {
-        row.bracket = bracket;
-        const team = categoryToTeam(t.name);
-        if (team) {
-          const cat = {
-            level: t.outline, name: t.name.replace(/:$/, '').trim(), team,
-            children: [], ownFinish: toDate(t.finish),
-          };
-          stack.push(cat);
-          row.action = (row.action ? row.action + ' + ' : '') + `OPENS "${cat.name}" → ${team}`;
-          row.opens = true;
-        } else {
-          unmappedBrackets.push({ name: t.name, bracket, outline: t.outline });
-          row.action = (row.action ? row.action + ' + ' : '') + `bracket "(${bracket})" NOT in mapping table`;
-          row.unmapped = true;
-        }
+      row.bracket = bracket || '';
+      // Always try categoryToTeam() — it checks the bracket first, then
+      // falls back to the name-based match. Previously this fallback was
+      // only ever reached when a bracket existed but wasn't recognized;
+      // tasks with NO bracket at all skipped straight to "unmapped" without
+      // ever trying the name match, which defeated the fallback entirely.
+      const team = categoryToTeam(t.name);
+      if (team) {
+        const viaBracket = bracket && CATEGORY_TEAM_MAP[bracket] === team;
+        const cat = {
+          level: t.outline, name: t.name.replace(/:$/, '').trim(), team,
+          children: [], ownFinish: toDate(t.finish),
+        };
+        stack.push(cat);
+        row.action = (row.action ? row.action + ' + ' : '') +
+          `OPENS "${cat.name}" → ${team}` + (viaBracket ? '' : ' (via name fallback — no/unrecognized bracket)');
+        row.opens = true;
+      } else if (bracket) {
+        unmappedBrackets.push({ name: t.name, bracket, outline: t.outline });
+        row.action = (row.action ? row.action + ' + ' : '') + `bracket "(${bracket})" NOT in mapping table`;
+        row.unmapped = true;
       } else {
         unbracketedSummaries.push({ name: t.name, outline: t.outline });
-        if (!row.action) row.action = 'un-bracketed header — no team assigned';
+        if (!row.action) row.action = 'un-bracketed header — no team assigned (name fallback also found nothing)';
       }
     }
 
