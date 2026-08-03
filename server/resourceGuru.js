@@ -88,7 +88,12 @@ async function fetchResourceTypes() {
 }
 
 // v2 utilisation report for a single week range
-// Returns array of resources with booked/availability totals for that period
+// Returns array of resources with booked/availability totals for that period.
+// IMPORTANT: "booked" here includes BOTH confirmed AND tentative bookings —
+// Resource Guru's Report endpoint does not separate them. "waiting_list" is a
+// totally different concept (overflow bookings that don't fit within
+// availability due to a clash), not "tentative". Use fetchBookings() below
+// for a real confirmed-vs-tentative split.
 async function fetchReportRange(from, to) {
   await ensureToken();
   const url = new URL(`${BASE}/${process.env.RG_ACCOUNT}/reports/resources`);
@@ -115,6 +120,49 @@ async function fetchReport(from, to) {
   return fetchReportRange(from, to);
 }
 
+// Raw Bookings for a date range, across ALL resources, paginated.
+// Each Booking has a top-level "tentative" boolean and a "durations" array
+// (one entry per calendar day, each with its own "date", "duration" in
+// minutes, and a "waiting" boolean for waiting-list days). This is the ONLY
+// way to distinguish real tentative bookings from confirmed ones — the
+// Report endpoint lumps them together into "booked".
+async function fetchBookings(from, to) {
+  await ensureToken();
+  console.log(`[RG] Fetching bookings: ${from} → ${to}...`);
+  const results = [];
+  const limit = 100;
+  let offset = 0;
+  while (true) {
+    const url = new URL(`${BASE}/${process.env.RG_ACCOUNT}/bookings`);
+    url.searchParams.set('start_date', from);
+    url.searchParams.set('end_date',   to);
+    url.searchParams.set('limit',  limit);
+    url.searchParams.set('offset', offset);
+
+    let page;
+    while (true) {
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${_accessToken}` },
+      });
+      if (res.status === 429) {
+        const retry = parseInt(res.headers.get('Retry-After') || '5', 10);
+        console.warn(`[RG] Rate limited on bookings — waiting ${retry}s`);
+        await sleep(retry * 1000);
+        continue;
+      }
+      if (!res.ok) throw new Error(`RG bookings ${res.status}: ${await res.text()}`);
+      page = await res.json();
+      break;
+    }
+    if (!Array.isArray(page) || page.length === 0) break;
+    results.push(...page);
+    if (page.length < limit) break; // last page
+    offset += limit;
+    await sleep(150);
+  }
+  console.log(`[RG] Fetched ${results.length} bookings total`);
+  return results;
+}
 
 module.exports = {
   authenticate,
@@ -122,6 +170,7 @@ module.exports = {
   fetchResourceTypes,
   fetchReport,
   fetchReportRange,
+  fetchBookings,
   sleep,
   BASE,
 };
