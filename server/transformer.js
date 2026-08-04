@@ -67,16 +67,29 @@ function isNonPerson(rtName) {
 }
 
 // ── Excluded projects ──────────────────────────────────────────────────────
-// Bookings under these projects (matched by exact name, case-insensitive)
-// never count toward utilised/tentative hours — e.g. standing on-call/rota
+// Bookings under these projects (matched by name, case-insensitive) never
+// count toward utilised/tentative hours — e.g. standing on-call/rota
 // bookings that would otherwise inflate real project utilisation. Add more
 // names here if other rota-style projects need the same treatment.
+//
+// Enter the plain project name only — do NOT include a "(Client Name)"
+// suffix even if that's what you see in the Resource Guru scheduler UI.
+// RG's UI displays bookings as "Project (Client)", but the underlying
+// project's own `name` field is just the project part; the client name in
+// parentheses is appended for display only and isn't part of the real name.
 const EXCLUDED_PROJECT_NAMES = [
-  'SLA-ROTA NIGHTS ON CALL (SLA-Controls)',
-  'SLA ROTA- CONTROLS (SLA-Controls)',
+  'SLA-ROTA NIGHTS ON CALL',
+  'SLA ROTA- CONTROLS',
 ];
+// Strips a trailing "(...)" suffix (a client name someone may have copied in
+// from the UI display) before comparing, so matching works whether or not
+// that suffix is present on either side.
 function normalizeProjectName(name) {
-  return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return (name || '')
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 }
 const EXCLUDED_PROJECT_NAMES_NORMALIZED = new Set(EXCLUDED_PROJECT_NAMES.map(normalizeProjectName));
 
@@ -159,6 +172,17 @@ async function buildRawData(from, to) {
         console.log(`[Transform] Resolved ${excludedProjectIds.size} excluded project id(s) from name match`);
       } else {
         console.warn(`[Transform] No projects matched EXCLUDED_PROJECT_NAMES (${EXCLUDED_PROJECT_NAMES.join(', ')}) — check spelling/case against your RG project list`);
+        // Print real project names containing "SLA" or "ROTA" (if any) so a
+        // spelling/formatting mismatch is visible immediately from the logs,
+        // instead of needing another round-trip to find the exact name.
+        const candidates = projects
+          .filter(p => /sla|rota/i.test(p.name || ''))
+          .map(p => `"${p.name}" (id ${p.id})`);
+        if (candidates.length) {
+          console.warn(`[Transform] Closest real project name(s) found: ${candidates.join(', ')} — compare exact spelling/punctuation against EXCLUDED_PROJECT_NAMES above`);
+        } else {
+          console.warn(`[Transform] No project name containing "SLA" or "ROTA" found at all in this account's ${projects.length} projects — full list: ${projects.map(p => `"${p.name}"`).join(', ')}`);
+        }
       }
     }
 
