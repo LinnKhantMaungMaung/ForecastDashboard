@@ -541,9 +541,17 @@
       <div><div class="settings-row-label">Include Tentative Bookings</div><div class="settings-row-desc">Waiting list / tentative hours</div></div>
       <label class="toggle"><input type="checkbox" id="s-tentative" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
-    <div class="settings-row">
-      <div><div class="settings-row-label">Include SLA-Rota Bookings</div><div class="settings-row-desc">Standing on-call rotas (e.g. SLA-Controls, SLA-Helix) — off by default so they don't inflate real project utilisation</div></div>
-      <label class="toggle"><input type="checkbox" id="s-includeSla" onchange="applySettings()"><span class="toggle-slider"></span></label>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">SLA-Rota Bookings</div>
+    <div class="settings-row-desc" style="margin-bottom:8px">Standing on-call rotas (e.g. SLA-Controls, SLA-Helix). Off by default so they don't inflate real project utilisation — check individual rotas below to include their hours.</div>
+    <input class="settings-search" id="sla-project-search" placeholder="Search SLA-rota projects..." oninput="filterSlaProjectList()">
+    <div class="settings-filter-list" id="sla-project-filter-list">
+      <div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Loading...</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button onclick="setAllSlaProjects(true)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Include All</button>
+      <button onclick="setAllSlaProjects(false)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Exclude All</button>
     </div>
   </div>
   <div class="settings-section">
@@ -658,13 +666,18 @@ let phaseCounter = 0;
 let editingPhaseSnapshots = {};
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false, includeSla:false };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
 let HIDDEN_PEOPLE  = new Set();
 // Contractor overrides: Set of person names treated as employees
 let CONTRACTOR_OVERRIDES = new Set();
+// SLA-rota project inclusion: empty by default = every rota (SLA-Controls,
+// SLA-Helix, etc.) excluded from utilisation. Add a project name here to
+// count its hours — mirrors the per-employee/per-department checklist
+// pattern rather than one blanket toggle.
+let INCLUDED_SLA_PROJECTS = new Set();
 // Saved highlighted team/dataset label
 let savedHighlight = null;
 
@@ -684,7 +697,6 @@ function applySettings() {
     staff:       document.getElementById('s-staff').checked,
     showDates:   document.getElementById('s-showDates').checked,
     showCategoryTags: document.getElementById('s-showCategoryTags').checked,
-    includeSla:  document.getElementById('s-includeSla').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
@@ -738,10 +750,16 @@ function getFilteredTeams() {
     const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
     const share = depts.length;
     let uHrs = (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
-    // SLA-rota bookings (standing on-call rotas) are tracked separately server-side
-    // and excluded from utilisation by default — only added back in if toggled on.
-    if (SETTINGS.includeSla) {
-      uHrs += (SETTINGS.confirmed ? (r.sla_hours||0) : 0) + (SETTINGS.tentative ? (r.sla_tentative_hours||0) : 0);
+    // SLA-rota bookings are tracked per-project server-side and excluded by
+    // default — only the specific projects the user has checked in Settings
+    // get added back in.
+    if (INCLUDED_SLA_PROJECTS.size) {
+      for (const [proj, hrs] of Object.entries(r.sla_rota_hours || {})) {
+        if (INCLUDED_SLA_PROJECTS.has(proj) && SETTINGS.confirmed) uHrs += hrs;
+      }
+      for (const [proj, hrs] of Object.entries(r.sla_rota_tentative_hours || {})) {
+        if (INCLUDED_SLA_PROJECTS.has(proj) && SETTINGS.tentative) uHrs += hrs;
+      }
     }
     for (const team of depts) {
       if (HIDDEN_DEPTS.has(team)) continue; // department hidden
@@ -764,8 +782,13 @@ function getFilteredEngineers() {
   }).map(e=>{
     let utilized_hours = (SETTINGS.confirmed ? (e.utilized_hours||0) : 0)
                        + (SETTINGS.tentative  ? (e.tentative_hours||0) : 0);
-    if (SETTINGS.includeSla) {
-      utilized_hours += (SETTINGS.confirmed ? (e.sla_hours||0) : 0) + (SETTINGS.tentative ? (e.sla_tentative_hours||0) : 0);
+    if (INCLUDED_SLA_PROJECTS.size) {
+      for (const [proj, hrs] of Object.entries(e.sla_rota_hours || {})) {
+        if (INCLUDED_SLA_PROJECTS.has(proj) && SETTINGS.confirmed) utilized_hours += hrs;
+      }
+      for (const [proj, hrs] of Object.entries(e.sla_rota_tentative_hours || {})) {
+        if (INCLUDED_SLA_PROJECTS.has(proj) && SETTINGS.tentative) utilized_hours += hrs;
+      }
     }
     return { ...e, utilized_hours };
   });
@@ -2344,6 +2367,7 @@ function saveState() {
       hiddenDepts:             [...HIDDEN_DEPTS],
       hiddenPeople:            [...HIDDEN_PEOPLE],
       contractorOverrides:     [...CONTRACTOR_OVERRIDES],
+      includedSlaProjects:     [...INCLUDED_SLA_PROJECTS],
       savedHighlight:          savedHighlight,
       heatmapWeekFilter:       heatmapWeekFilter,
       heatmapDateFrom:         document.getElementById('heatmap-date-from')?.value||'',
@@ -2384,6 +2408,7 @@ function restoreState() {
     if (Array.isArray(s.hiddenDepts))         HIDDEN_DEPTS         = new Set(s.hiddenDepts);
     if (Array.isArray(s.hiddenPeople))        HIDDEN_PEOPLE        = new Set(s.hiddenPeople);
     if (Array.isArray(s.contractorOverrides)) CONTRACTOR_OVERRIDES = new Set(s.contractorOverrides);
+    if (Array.isArray(s.includedSlaProjects)) INCLUDED_SLA_PROJECTS = new Set(s.includedSlaProjects);
     if (s.savedHighlight !== undefined)       savedHighlight       = s.savedHighlight;
     if (s.heatmapWeekFilter)                  heatmapWeekFilter    = s.heatmapWeekFilter;
     if (s.heatmapDateFrom) { const el=document.getElementById('heatmap-date-from'); if(el) el.value=s.heatmapDateFrom; }
@@ -2441,6 +2466,7 @@ function buildSettingsLists() {
   buildDeptList();
   buildPeopleList();
   buildContractorList();
+  buildSlaProjectList();
 }
 
 function buildDeptList(filter='') {
@@ -2466,6 +2492,33 @@ function buildPeopleList(filter='') {
       <label><input type="checkbox" ${HIDDEN_PEOPLE.has(e.name)?'':'checked'} onchange="togglePerson('${e.name.replace(/'/g,"\'")}',this.checked)"> ${e.name}</label>
       <span style="font-size:10px;color:var(--muted)">${e.team||''}</span>
     </div>`).join('');
+}
+
+function buildSlaProjectList(filter='') {
+  const list = document.getElementById('sla-project-filter-list');
+  if (!list) return;
+  const projects = (RAW.meta?.sla_rota_projects || [])
+    .filter(p => p.toLowerCase().includes(filter.toLowerCase()))
+    .sort();
+  if (!projects.length) { list.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center">No SLA-rota projects found</div>'; return; }
+  list.innerHTML = projects.map(p => `
+    <div class="settings-filter-item">
+      <label><input type="checkbox" ${INCLUDED_SLA_PROJECTS.has(p)?'checked':''} onchange="toggleSlaProject('${p.replace(/'/g,"\\'")}',this.checked)"> ${p}</label>
+    </div>`).join('');
+}
+function filterSlaProjectList(){ buildSlaProjectList(document.getElementById('sla-project-search')?.value||''); }
+function toggleSlaProject(name, included) {
+  if (included) INCLUDED_SLA_PROJECTS.add(name); else INCLUDED_SLA_PROJECTS.delete(name);
+  applyFilters();
+  saveState();
+}
+function setAllSlaProjects(included) {
+  const projects = RAW.meta?.sla_rota_projects || [];
+  if (included) projects.forEach(p => INCLUDED_SLA_PROJECTS.add(p));
+  else INCLUDED_SLA_PROJECTS.clear();
+  buildSlaProjectList(document.getElementById('sla-project-search')?.value||'');
+  applyFilters();
+  saveState();
 }
 
 function buildContractorList(filter='') {
