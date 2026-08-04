@@ -227,6 +227,27 @@ async function buildRawData(from, to) {
   let confirmedTentativeBreakdown = {};
   try {
     const bookings = await fetchBookings(from, to);
+
+    // Diagnostic: dump the RAW shape of any booking that even loosely
+    // mentions "sla" or "rota" anywhere in its text fields, regardless of
+    // whether our current match logic catches it. This shows us exactly
+    // what field actually carries the identifying text/id instead of
+    // guessing at it again — client_id, project_id, details, and notes are
+    // all printed so a mismatch anywhere is visible in one shot.
+    const looksRelevant = (b) => {
+      const haystack = `${b.details || ''} ${b.notes || ''}`.toLowerCase();
+      return /sla|rota/.test(haystack);
+    };
+    const relevantSample = bookings.filter(looksRelevant).slice(0, 5);
+    if (relevantSample.length) {
+      console.log(`[Transform] Found ${bookings.filter(looksRelevant).length} booking(s) mentioning "sla"/"rota" in details/notes — sample:`);
+      relevantSample.forEach(b => {
+        console.log(`[Transform]   resource_id=${b.resource_id} client_id=${b.client_id} project_id=${b.project_id} tentative=${b.tentative} details=${JSON.stringify(b.details)} notes=${JSON.stringify(b.notes)}`);
+      });
+    } else {
+      console.warn(`[Transform] NONE of the ${bookings.length} bookings fetched for ${from}→${to} mention "sla" or "rota" anywhere in details/notes. Either these bookings fall outside this date range, or the identifying text lives in a different field (e.g. a custom field, activity type, or the booker's own name) than details/notes.`);
+    }
+
     confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedClientIds);
     console.log(`[Transform] Confirmed/tentative breakdown built from ${bookings.length} bookings`);
   } catch (err) {
