@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchClients, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -66,32 +66,48 @@ function isNonPerson(rtName) {
   return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
 }
 
-// ── Excluded projects ──────────────────────────────────────────────────────
-// Bookings under these projects (matched by name, case-insensitive) never
-// count toward utilised/tentative hours — e.g. standing on-call/rota
-// bookings that would otherwise inflate real project utilisation. Add more
-// names here if other rota-style projects need the same treatment.
-//
-// Enter the plain project name only — do NOT include a "(Client Name)"
-// suffix even if that's what you see in the Resource Guru scheduler UI.
-// RG's UI displays bookings as "Project (Client)", but the underlying
-// project's own `name` field is just the project part; the client name in
-// parentheses is appended for display only and isn't part of the real name.
-const EXCLUDED_PROJECT_NAMES = [
+// ── Excluded bookings ────────────────────────────────────────────────────────
+// These specific standing/rota bookings never count toward utilised or
+// tentative hours (e.g. on-call rotas that would otherwise inflate real
+// project utilisation). Turned out they aren't tied to a Project at all —
+// checked the account's full Project list and nothing matched — so instead
+// of project name, this matches on:
+//   (a) the booking's own "details"/"notes" text, AND/OR
+//   (b) the Client the booking is assigned to,
+// combined with OR, so it catches the booking regardless of which field
+// actually carries the identifying info. Add more entries to either list if
+// other rota-style bookings need the same treatment.
+const EXCLUDED_BOOKING_DETAILS = [
   'SLA-ROTA NIGHTS ON CALL',
   'SLA ROTA- CONTROLS',
 ];
-// Strips a trailing "(...)" suffix (a client name someone may have copied in
-// from the UI display) before comparing, so matching works whether or not
-// that suffix is present on either side.
-function normalizeProjectName(name) {
+const EXCLUDED_CLIENT_NAMES = [
+  'SLA-Controls',
+];
+// Strips a trailing "(...)" suffix (in case a client name got copied in
+// alongside the details text from the UI display) before comparing.
+function normalizeText(name) {
   return (name || '')
     .replace(/\s*\([^)]*\)\s*$/, '')
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
 }
-const EXCLUDED_PROJECT_NAMES_NORMALIZED = new Set(EXCLUDED_PROJECT_NAMES.map(normalizeProjectName));
+const EXCLUDED_BOOKING_DETAILS_NORMALIZED = new Set(EXCLUDED_BOOKING_DETAILS.map(normalizeText));
+const EXCLUDED_CLIENT_NAMES_NORMALIZED    = new Set(EXCLUDED_CLIENT_NAMES.map(normalizeText));
+
+// A booking's own details/notes text matches one of the excluded strings —
+// either the WHOLE field (after normalizing) or, since some bookings may
+// have extra text appended, if it contains the excluded string as a
+// substring. "notes" is RG's deprecated alias for "details" — check both.
+function bookingDetailsMatch(b) {
+  const text = normalizeText(b.details || b.notes || '');
+  if (!text) return false;
+  for (const excluded of EXCLUDED_BOOKING_DETAILS_NORMALIZED) {
+    if (text === excluded || text.includes(excluded)) return true;
+  }
+  return false;
+}
 
 // ── Confirmed vs Tentative breakdown from real Bookings ──────────────────────
 // Resource Guru's Report endpoint only exposes "booked" (confirmed AND
@@ -106,17 +122,20 @@ const EXCLUDED_PROJECT_NAMES_NORMALIZED = new Set(EXCLUDED_PROJECT_NAMES.map(nor
 // duration into the correct week, split by that flag. Waiting-list days
 // (duration.waiting === true) are excluded from both buckets here — they're
 // a separate concept from "tentative" and aren't what this toggle means.
-// Bookings under an EXCLUDED_PROJECT_NAMES project are dropped entirely —
-// they never contribute to confirmed or tentative hours either.
+// Bookings matching EXCLUDED_BOOKING_DETAILS (by text) or EXCLUDED_CLIENT_NAMES
+// (by client_id) are dropped entirely — they never contribute to confirmed
+// or tentative hours either.
 //
 // Returns: { "resourceId|weekLabel": { confirmedMins, tentativeMins } }
-function buildConfirmedTentativeBreakdown(bookings, excludedProjectIds) {
+function buildConfirmedTentativeBreakdown(bookings, excludedClientIds) {
   const breakdown = {};
   let excludedCount = 0;
   for (const b of bookings) {
     const resId = b.resource_id;
     if (resId == null) continue;
-    if (b.project_id != null && excludedProjectIds.has(b.project_id)) { excludedCount++; continue; }
+    const excludedByClient  = b.client_id != null && excludedClientIds.has(b.client_id);
+    const excludedByDetails = bookingDetailsMatch(b);
+    if (excludedByClient || excludedByDetails) { excludedCount++; continue; }
     const isTentative = b.tentative === true;
     for (const d of (b.durations || [])) {
       if (d.waiting) continue; // waiting list ≠ tentative — excluded from this split
@@ -127,7 +146,7 @@ function buildConfirmedTentativeBreakdown(bookings, excludedProjectIds) {
       else              breakdown[key].confirmedMins += (d.duration || 0);
     }
   }
-  if (excludedCount > 0) console.log(`[Transform] Excluded ${excludedCount} bookings under excluded projects (${EXCLUDED_PROJECT_NAMES.join(', ')})`);
+  if (excludedCount > 0) console.log(`[Transform] Excluded ${excludedCount} bookings matching excluded details (${EXCLUDED_BOOKING_DETAILS.join(', ')}) or client (${EXCLUDED_CLIENT_NAMES.join(', ')})`);
   return breakdown;
 }
 
@@ -140,13 +159,13 @@ async function buildRawData(from, to) {
   const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
   let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
   const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
-  const excludedProjectIds = new Set(); // RG project ids matching EXCLUDED_PROJECT_NAMES
+  const excludedClientIds  = new Set(); // RG client ids matching EXCLUDED_CLIENT_NAMES
 
   try {
-    const [resources, resourceTypes, projects] = await Promise.all([
+    const [resources, resourceTypes, clients] = await Promise.all([
       fetchResources(),
       fetchResourceTypes(),
-      fetchProjects(),
+      fetchClients(),
     ]);
 
     if (Array.isArray(resourceTypes)) {
@@ -162,26 +181,21 @@ async function buildRawData(from, to) {
       }
     }
 
-    if (Array.isArray(projects)) {
-      projects.forEach(p => {
-        if (EXCLUDED_PROJECT_NAMES_NORMALIZED.has(normalizeProjectName(p.name))) {
-          excludedProjectIds.add(p.id);
+    if (Array.isArray(clients)) {
+      clients.forEach(c => {
+        if (EXCLUDED_CLIENT_NAMES_NORMALIZED.has(normalizeText(c.name))) {
+          excludedClientIds.add(c.id);
         }
       });
-      if (excludedProjectIds.size > 0) {
-        console.log(`[Transform] Resolved ${excludedProjectIds.size} excluded project id(s) from name match`);
+      if (excludedClientIds.size > 0) {
+        console.log(`[Transform] Resolved ${excludedClientIds.size} excluded client id(s) from name match`);
       } else {
-        console.warn(`[Transform] No projects matched EXCLUDED_PROJECT_NAMES (${EXCLUDED_PROJECT_NAMES.join(', ')}) — check spelling/case against your RG project list`);
-        // Print real project names containing "SLA" or "ROTA" (if any) so a
-        // spelling/formatting mismatch is visible immediately from the logs,
-        // instead of needing another round-trip to find the exact name.
-        const candidates = projects
-          .filter(p => /sla|rota/i.test(p.name || ''))
-          .map(p => `"${p.name}" (id ${p.id})`);
+        console.warn(`[Transform] No clients matched EXCLUDED_CLIENT_NAMES (${EXCLUDED_CLIENT_NAMES.join(', ')}) — relying on booking-details text match only for these exclusions`);
+        const candidates = clients
+          .filter(c => /sla/i.test(c.name || ''))
+          .map(c => `"${c.name}" (id ${c.id})`);
         if (candidates.length) {
-          console.warn(`[Transform] Closest real project name(s) found: ${candidates.join(', ')} — compare exact spelling/punctuation against EXCLUDED_PROJECT_NAMES above`);
-        } else {
-          console.warn(`[Transform] No project name containing "SLA" or "ROTA" found at all in this account's ${projects.length} projects — full list: ${projects.map(p => `"${p.name}"`).join(', ')}`);
+          console.warn(`[Transform] Closest real client name(s) found: ${candidates.join(', ')} — compare exact spelling/punctuation against EXCLUDED_CLIENT_NAMES above`);
         }
       }
     }
@@ -208,11 +222,12 @@ async function buildRawData(from, to) {
   // Fetch every Booking in the whole range ONCE (not per-week — much lighter
   // on the API than the existing weekly report loop), then bucket
   // confirmed/tentative minutes per resource per week ourselves from each
-  // booking's durations, excluding any booking under an excluded project.
+  // booking's durations, excluding any booking that matches by details text
+  // or client (see EXCLUDED_BOOKING_DETAILS / EXCLUDED_CLIENT_NAMES above).
   let confirmedTentativeBreakdown = {};
   try {
     const bookings = await fetchBookings(from, to);
-    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedProjectIds);
+    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedClientIds);
     console.log(`[Transform] Confirmed/tentative breakdown built from ${bookings.length} bookings`);
   } catch (err) {
     console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative will read as 0, excluded projects will NOT be filtered):', err.message);
