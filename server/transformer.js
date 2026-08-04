@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, fetchDowntimes, fetchDowntimeTypes, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -149,6 +149,52 @@ function buildConfirmedTentativeBreakdown(bookings, slaProjectIdToName) {
   return breakdown;
 }
 
+// ── Time Off / Downtime hours per resource per week ──────────────────────────
+// Downtimes are a SEPARATE Resource Guru resource from Bookings entirely
+// (confirmed via the RG UI's "Time Off" popup — a distinct black-bar style
+// from colored project Bookings). Each event has resource_ids (an array —
+// one event can cover several people), a from/to date range, and
+// start_time/end_time in minutes-from-midnight applying per day in that
+// range. Only "Approved" (not Pending/Declined) and non-deleted events count
+// as real absence.
+//
+// This is currently DIAGNOSTIC ONLY — computed and logged so we can compare
+// against Resource Guru's own "availability" figure (see the comparison in
+// buildRawData below) before deciding whether availability needs a manual
+// adjustment. If RG's own Report already nets Downtime out of availability
+// (very plausible — that's the whole point of tracking Time Off), applying
+// our own subtraction on top would double-count and make things WRONG in
+// the other direction. Confirm from real data first.
+//
+// Returns: { "resourceId|weekLabel": hours }
+function buildDowntimeHoursByResourceWeek(downtimes) {
+  const map = {};
+  let approvedCount = 0, skippedCount = 0;
+  for (const dt of downtimes) {
+    if (dt.deleted) { skippedCount++; continue; }
+    if (dt.state && dt.state !== 'Approved') { skippedCount++; continue; }
+    approvedCount++;
+    const dayMins = Math.max(0, (dt.end_time ?? 1440) - (dt.start_time ?? 0));
+    const dayHours = dayMins / 60;
+    const start = new Date(dt.from + 'T00:00:00Z');
+    const end   = new Date(dt.to   + 'T00:00:00Z');
+    for (const resId of (dt.resource_ids || [])) {
+      const cur = new Date(start);
+      while (cur <= end) {
+        const dow = cur.getUTCDay();
+        if (dow !== 0 && dow !== 6) { // weekdays only
+          const wk = toWeekLabel(cur);
+          const key = `${resId}|${wk}`;
+          map[key] = (map[key] || 0) + dayHours;
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+    }
+  }
+  console.log(`[Transform] Downtime (Time Off): ${approvedCount} approved event(s) processed, ${skippedCount} skipped (deleted or not Approved)`);
+  return map;
+}
+
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
   console.log(`[Transform] Building data for ${weeks.length} weeks (${from} → ${to})`);
@@ -186,6 +232,20 @@ async function buildRawData(from, to) {
       matched.forEach(p => slaProjectIdToName.set(p.id, p.name));
       slaRotaProjectNames = matched.map(p => p.name).sort();
       console.log(`[Transform] SLA-rota projects found (${matched.length} of ${projects.length} total): ${slaRotaProjectNames.map(n => `"${n}"`).join(', ') || '(none)'}`);
+
+      // HOLIDAY DIAGNOSTIC v2 — searching booking free-text notes (v1) found
+      // only false positives: real project work that happens to mention
+      // "holiday"/"sick"/"leave" in passing ("DWS Sick Scanner interface",
+      // "Bank Holiday Weekend Working", "covering for Mike whilst he is on
+      // holiday"). Same class of mistake SLA-rota matching made at first —
+      // free text is too noisy. This instead searches actual PROJECT NAMES,
+      // which is what correctly identified the real SLA-rota projects.
+      const holidayProjects = projects.filter(p => /holiday|annual leave|\bleave\b|\bpto\b|day[\s-]?off|sickness|\bsick\b/i.test(p.name || ''));
+      if (holidayProjects.length) {
+        console.log(`[Transform] HOLIDAY DIAGNOSTIC v2 (project name match): found ${holidayProjects.length} project(s): ${holidayProjects.map(p => `"${p.name}" (id ${p.id})`).join(', ')}`);
+      } else {
+        console.warn(`[Transform] HOLIDAY DIAGNOSTIC v2: no project name matches holiday/leave/PTO/sick out of ${projects.length} total projects. This suggests holidays in this account are NOT tracked as a Booking against a Project at all — likely Resource Guru's separate Leave/Absence feature instead, which has its own API area we haven't pulled from yet. If that's the case, "availability" (see below) may or may not already reflect it depending on whether RG nets Leave against capacity automatically — worth confirming directly: open a person's RG profile for a week they were on holiday and check whether it shows as a Leave entry (usually a distinct color/label from normal Bookings) or an actual Booking.`);
+      }
     } else {
       console.warn('[Transform] Projects fetch returned no array — SLA-rota matching will rely on booking-details text only');
     }
@@ -218,34 +278,21 @@ async function buildRawData(from, to) {
     const bookings = await fetchBookings(from, to);
     confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, slaProjectIdToName);
     console.log(`[Transform] Confirmed/tentative/SLA breakdown built from ${bookings.length} bookings`);
-
-    // ── Diagnostic: how are Holiday/Leave bookings categorized? ─────────────
-    // NOT yet excluded from utilised hours — this only reports what's found,
-    // so we can implement the right fix from real data instead of guessing
-    // (this is exactly the mistake made with SLA-rota matching earlier).
-    // A booking during someone's holiday currently still counts as
-    // "confirmed work" if it isn't a recognized rota — if holiday is booked
-    // as a regular Booking (not RG's separate Leave/Absence feature), it
-    // would incorrectly inflate utilisation the same way SLA-rota did.
-    const holidayCandidates = bookings.filter(b => {
-      const text = `${b.details || ''} ${b.notes || ''}`.toLowerCase();
-      return /holiday|annual leave|\bleave\b|\bpto\b|day off|sick(?:\s|$)/i.test(text);
-    });
-    const uniqueHolidayCombos = new Map(); // "projectId|clientId" -> sample
-    holidayCandidates.forEach(b => {
-      const key = `${b.project_id}|${b.client_id}`;
-      if (!uniqueHolidayCombos.has(key)) uniqueHolidayCombos.set(key, b);
-    });
-    if (holidayCandidates.length) {
-      console.log(`[Transform] HOLIDAY DIAGNOSTIC: found ${holidayCandidates.length} booking(s) mentioning holiday/leave/PTO/sick in details or notes, across ${uniqueHolidayCombos.size} distinct project/client combo(s):`);
-      [...uniqueHolidayCombos.values()].slice(0, 10).forEach(b => {
-        console.log(`[Transform]   project_id=${b.project_id} client_id=${b.client_id} tentative=${b.tentative} details=${JSON.stringify(b.details)} notes=${JSON.stringify(b.notes)}`);
-      });
-    } else {
-      console.warn('[Transform] HOLIDAY DIAGNOSTIC: no booking in this date range mentions holiday/leave/PTO/sick in details/notes. If holidays ARE booked in this account, they may use RG\'s separate Leave/Absence feature instead (in which case they may already correctly reduce availability without needing a fix here), or a project/client name that doesn\'t match this text search — check a real holiday booking\'s Project/Client field directly in RG and let us know.');
-    }
   } catch (err) {
     console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative and SLA hours will read as 0):', err.message);
+  }
+
+  // Time Off (Downtime) — fetched once for the whole range, same pattern as
+  // Bookings. DIAGNOSTIC ONLY for now (see comparison against RG's own
+  // "availability" figure in the per-resource loop below) — not yet applied
+  // to available_hours until we've confirmed from real data whether RG
+  // already nets it out automatically.
+  let downtimeHoursByResourceWeek = {};
+  try {
+    const downtimes = await fetchDowntimes(from, to);
+    downtimeHoursByResourceWeek = buildDowntimeHoursByResourceWeek(downtimes);
+  } catch (err) {
+    console.warn('[Transform] Downtimes fetch failed — holiday/leave diagnostic will be skipped:', err.message);
   }
 
   const teamsMap     = {};
@@ -309,6 +356,21 @@ async function buildRawData(from, to) {
 
       // ── Hours (RG reports in MINUTES) ───────────────────────────────────
       const totalAvail = +((r.availability || 0) / 60).toFixed(2);
+
+      // HOLIDAY/DOWNTIME DIAGNOSTIC: compare our own computed downtime
+      // hours (from the real Time Off/Downtime API) against RG's own
+      // "availability" figure for this exact resource+week. This tells us
+      // definitively whether RG already nets Downtime out of availability:
+      //   - if availability looks LOW/reduced despite full nominal capacity
+      //     → RG already handles it, no fix needed here.
+      //   - if availability looks FULL/unreduced despite known downtime
+      //     → RG does NOT net it out automatically, and we need to manually
+      //     subtract our computed downtime hours ourselves.
+      const downtimeKey = `${r.id}|${wk.label}`;
+      const downtimeHrsThisWeek = downtimeHoursByResourceWeek[downtimeKey];
+      if (downtimeHrsThisWeek > 0) {
+        console.log(`[Transform] DOWNTIME DIAGNOSTIC: ${name} has ${downtimeHrsThisWeek.toFixed(1)}h of approved Time Off in week ${wk.label} — RG reports "availability"=${totalAvail}h for that same week. ${totalAvail < 5 ? '(looks ALREADY reduced — RG may be handling this correctly)' : '(looks FULL/unreduced — RG likely does NOT net this out automatically)'}`);
+      }
 
       // Confirmed / tentative split now comes from real Bookings data, not
       // the Report endpoint's "booked" (which is confirmed+tentative
