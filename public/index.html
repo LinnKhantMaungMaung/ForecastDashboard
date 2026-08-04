@@ -543,6 +543,23 @@
     </div>
   </div>
   <div class="settings-section">
+    <div class="settings-section-title">Unassigned / Placeholder Work</div>
+    <div class="settings-row-desc" style="margin-bottom:8px">Work booked against a department before a specific engineer is assigned. Shown as a dashed line above each department's solid utilisation line — never counted as an individual engineer's hours.</div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Show Unassigned Work Overlay</div><div class="settings-row-desc">Master on/off for this feature across all departments</div></div>
+      <label class="toggle"><input type="checkbox" id="s-showUnassigned" onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row-desc" style="margin:8px 0">Fine-tune per department (only applies while the master toggle above is on):</div>
+    <input class="settings-search" id="unassigned-dept-search" placeholder="Search departments..." oninput="filterUnassignedDeptList()">
+    <div class="settings-filter-list" id="unassigned-dept-filter-list">
+      <div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Loading...</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button onclick="setAllUnassignedDepts(true)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Include All</button>
+      <button onclick="setAllUnassignedDepts(false)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Exclude All</button>
+    </div>
+  </div>
+  <div class="settings-section">
     <div class="settings-section-title">SLA-Rota Bookings</div>
     <div class="settings-row-desc" style="margin-bottom:8px">Standing on-call rotas (e.g. SLA-Controls, SLA-Helix). Off by default so they don't inflate real project utilisation — check individual rotas below to include their hours.</div>
     <input class="settings-search" id="sla-project-search" placeholder="Search SLA-rota projects..." oninput="filterSlaProjectList()">
@@ -667,7 +684,7 @@ let phaseCounter = 0;
 let editingPhaseSnapshots = {};
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false, showUnassigned:true };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
@@ -679,6 +696,13 @@ let CONTRACTOR_OVERRIDES = new Set();
 // count its hours — mirrors the per-employee/per-department checklist
 // pattern rather than one blanket toggle.
 let INCLUDED_SLA_PROJECTS = new Set();
+// Unassigned/Placeholder work overlay: empty by default = every department
+// with placeholder-derived unassigned hours shows the dashed overlay line.
+// Add a department name here to hide just that one department's overlay
+// individually — mirrors the SLA-rota checklist pattern. The master
+// SETTINGS.showUnassigned toggle turns the whole feature off/on at once;
+// this set lets you fine-tune per department on top of that.
+let EXCLUDED_UNASSIGNED_DEPTS = new Set();
 // Currently active custom date range (null = using the server's default
 // range). Tracked so a page refresh, or the periodic background refresh
 // below, doesn't silently snap back to the default range while a custom
@@ -705,6 +729,7 @@ function applySettings() {
     staff:       document.getElementById('s-staff').checked,
     showDates:   document.getElementById('s-showDates').checked,
     showCategoryTags: document.getElementById('s-showCategoryTags').checked,
+    showUnassigned:   document.getElementById('s-showUnassigned').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
@@ -1017,11 +1042,14 @@ function renderUtilisation(){
 // aggregated from Placeholder-type resources — never attributed to an
 // individual engineer, so it isn't visible via getFilteredTeams()/RAW.engineers
 // at all). This builds a quick team+week lookup for it, respecting
-// department visibility and the tentative toggle same as everything else.
+// department visibility, the master on/off toggle, per-department
+// inclusion, and the tentative toggle same as everything else.
 function getUnassignedLookup(){
   const map={};
+  if(!SETTINGS.showUnassigned) return map; // master toggle off — nothing shown at all
   for(const r of RAW.teams){
     if(HIDDEN_DEPTS.has(r.team)) continue;
+    if(EXCLUDED_UNASSIGNED_DEPTS.has(r.team)) continue; // this specific department turned off individually
     const hrs=(r.unassigned_hours||0)+(SETTINGS.tentative?(r.unassigned_tentative_hours||0):0);
     map[r.team+'|'+r.week]=(map[r.team+'|'+r.week]||0)+hrs;
   }
@@ -2407,6 +2435,7 @@ function saveState() {
       hiddenPeople:            [...HIDDEN_PEOPLE],
       contractorOverrides:     [...CONTRACTOR_OVERRIDES],
       includedSlaProjects:     [...INCLUDED_SLA_PROJECTS],
+      excludedUnassignedDepts: [...EXCLUDED_UNASSIGNED_DEPTS],
       currentRangeFrom:        CURRENT_RANGE_FROM,
       currentRangeTo:          CURRENT_RANGE_TO,
       savedHighlight:          savedHighlight,
@@ -2450,6 +2479,7 @@ function restoreState() {
     if (Array.isArray(s.hiddenPeople))        HIDDEN_PEOPLE        = new Set(s.hiddenPeople);
     if (Array.isArray(s.contractorOverrides)) CONTRACTOR_OVERRIDES = new Set(s.contractorOverrides);
     if (Array.isArray(s.includedSlaProjects)) INCLUDED_SLA_PROJECTS = new Set(s.includedSlaProjects);
+    if (Array.isArray(s.excludedUnassignedDepts)) EXCLUDED_UNASSIGNED_DEPTS = new Set(s.excludedUnassignedDepts);
     if (s.currentRangeFrom && s.currentRangeTo) {
       CURRENT_RANGE_FROM = s.currentRangeFrom;
       CURRENT_RANGE_TO   = s.currentRangeTo;
@@ -2516,6 +2546,7 @@ function buildSettingsLists() {
   buildPeopleList();
   buildContractorList();
   buildSlaProjectList();
+  buildUnassignedDeptList();
 }
 
 function buildDeptList(filter='') {
@@ -2566,6 +2597,41 @@ function setAllSlaProjects(included) {
   if (included) projects.forEach(p => INCLUDED_SLA_PROJECTS.add(p));
   else INCLUDED_SLA_PROJECTS.clear();
   buildSlaProjectList(document.getElementById('sla-project-search')?.value||'');
+  applyFilters();
+  saveState();
+}
+
+// Departments that have any Placeholder-derived unassigned work anywhere in
+// the currently loaded data — built dynamically from RAW.teams so new
+// departments with placeholder bookings show up automatically.
+function getDeptsWithUnassignedWork(){
+  const depts = new Set();
+  for (const r of RAW.teams) {
+    if ((r.unassigned_hours||0) > 0 || (r.unassigned_tentative_hours||0) > 0) depts.add(r.team);
+  }
+  return [...depts].sort();
+}
+function buildUnassignedDeptList(filter='') {
+  const list = document.getElementById('unassigned-dept-filter-list');
+  if (!list) return;
+  const depts = getDeptsWithUnassignedWork().filter(d => d.toLowerCase().includes(filter.toLowerCase()));
+  if (!depts.length) { list.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center">No unassigned/placeholder work found</div>'; return; }
+  list.innerHTML = depts.map(d => `
+    <div class="settings-filter-item">
+      <label><input type="checkbox" ${EXCLUDED_UNASSIGNED_DEPTS.has(d)?'':'checked'} onchange="toggleUnassignedDept('${d.replace(/'/g,"\\'")}',this.checked)"> ${d}</label>
+    </div>`).join('');
+}
+function filterUnassignedDeptList(){ buildUnassignedDeptList(document.getElementById('unassigned-dept-search')?.value||''); }
+function toggleUnassignedDept(name, included) {
+  if (included) EXCLUDED_UNASSIGNED_DEPTS.delete(name); else EXCLUDED_UNASSIGNED_DEPTS.add(name);
+  applyFilters();
+  saveState();
+}
+function setAllUnassignedDepts(included) {
+  const depts = getDeptsWithUnassignedWork();
+  if (included) depts.forEach(d => EXCLUDED_UNASSIGNED_DEPTS.delete(d));
+  else depts.forEach(d => EXCLUDED_UNASSIGNED_DEPTS.add(d));
+  buildUnassignedDeptList(document.getElementById('unassigned-dept-search')?.value||'');
   applyFilters();
   saveState();
 }
