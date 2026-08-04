@@ -90,7 +90,7 @@ async function fetchResourceTypes() {
 // All Projects — used to identify bookings under specifically-excluded
 // projects (e.g. on-call/rota bookings that shouldn't count toward
 // utilisation) by matching on project name.
-async function fetchProjects() {
+async function fetchProjectsRaw() {
   console.log('[RG] Fetching projects (all pages)...');
   const results = [];
   const limit = 100;
@@ -118,7 +118,7 @@ async function fetchProjects() {
 // All Clients — some bookings aren't tied to a Project at all, only a
 // Client (e.g. standing rota bookings), so this is needed to resolve
 // client-based exclusions too.
-async function fetchClients() {
+async function fetchClientsRaw() {
   console.log('[RG] Fetching clients (all pages)...');
   const results = [];
   const limit = 100;
@@ -127,11 +127,42 @@ async function fetchClients() {
     const data = await rgGet('/clients', { limit, offset });
     if (!Array.isArray(data) || data.length === 0) break;
     results.push(...data);
-    offset += data.length; // see note in fetchProjects() above
+    offset += data.length; // see note in fetchProjectsRaw() above
     await sleep(150);
   }
   console.log(`[RG] Fetched ${results.length} clients total`);
   return results;
+}
+
+// ── Shared long-lived cache for Projects/Clients ────────────────────────────
+// Unlike weekly booking/report data, the account's project and client lists
+// barely change day to day. buildRawData() can run once per distinct date
+// range requested (see the dashboard's per-range cache), and without this,
+// each of those would trigger a full projects+clients refetch even though
+// the underlying list is identical every time. Cached here independently of
+// that per-range cache, with its own longer TTL.
+const LOOKUP_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+let _projectsCache = { data: null, expiresAt: 0 };
+let _clientsCache  = { data: null, expiresAt: 0 };
+
+async function fetchProjects(forceRefresh = false) {
+  if (!forceRefresh && _projectsCache.data && Date.now() < _projectsCache.expiresAt) {
+    console.log(`[RG] Using cached projects list (${_projectsCache.data.length} projects)`);
+    return _projectsCache.data;
+  }
+  const data = await fetchProjectsRaw();
+  _projectsCache = { data, expiresAt: Date.now() + LOOKUP_CACHE_TTL_MS };
+  return data;
+}
+
+async function fetchClients(forceRefresh = false) {
+  if (!forceRefresh && _clientsCache.data && Date.now() < _clientsCache.expiresAt) {
+    console.log(`[RG] Using cached clients list (${_clientsCache.data.length} clients)`);
+    return _clientsCache.data;
+  }
+  const data = await fetchClientsRaw();
+  _clientsCache = { data, expiresAt: Date.now() + LOOKUP_CACHE_TTL_MS };
+  return data;
 }
 
 // v2 utilisation report for a single week range
