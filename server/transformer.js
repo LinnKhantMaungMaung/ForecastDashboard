@@ -179,6 +179,7 @@ async function buildRawData(from, to) {
 
   // Dept option lookup and resource metadata — declared outside try so weekly loop can use them
   const deptOptionLookup   = {}; // option_id(number) → department name
+  const departmentFieldIdByResourceTypeId = {}; // resourceTypeId → custom_field id for "Department"
   const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
   let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
   const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
@@ -193,17 +194,31 @@ async function buildRawData(from, to) {
       fetchProjects(),
     ]);
 
+    // Department custom field ID → resourceTypeId → fieldId map. Resource
+    // Guru defines custom fields PER RESOURCE TYPE independently, so
+    // "Department" for Person and "Department" for Placeholder can (and
+    // here, do) have entirely different numeric field IDs, even though the
+    // UI shows the same concept for both. Previously this only looked at
+    // the Person type's field (hardcoded id 81460), so Placeholder
+    // resources' departments were never read at all — their custom_fields
+    // live under a different key. Fixed by matching on the field NAME
+    // ("Department") across every resource type, and merging all their
+    // option lookups into the same shared deptOptionLookup (the option
+    // VALUES like "Control Panels - Notts" are the same strings regardless
+    // of which type's field ID points to them).
     if (Array.isArray(resourceTypes)) {
-      // Build department option ID → name map from custom field 81460 on Person type
-      const personType = resourceTypes.find(rt => rt.id === 225004);
-      const deptField  = personType?.custom_fields?.find(cf => cf.id === 81460);
-      if (deptField?.custom_field_options) {
-        deptField.custom_field_options.forEach(opt => {
-          deptOptionLookup[Number(opt.id)] = opt.value;
-          deptOptionLookup[String(opt.id)] = opt.value; // also index by string
-        });
-        console.log(`[Transform] Departments loaded: ${Object.values(deptOptionLookup).filter((v,i,a)=>a.indexOf(v)===i).join(', ')}`);
-      }
+      resourceTypes.forEach(rt => {
+        const deptField = rt.custom_fields?.find(cf => /department/i.test(cf.name || ''));
+        if (deptField) {
+          departmentFieldIdByResourceTypeId[rt.id] = deptField.id;
+          (deptField.custom_field_options || []).forEach(opt => {
+            deptOptionLookup[Number(opt.id)] = opt.value;
+            deptOptionLookup[String(opt.id)] = opt.value; // also index by string
+          });
+        }
+      });
+      console.log(`[Transform] Departments loaded: ${Object.values(deptOptionLookup).filter((v,i,a)=>a.indexOf(v)===i).join(', ')}`);
+      console.log(`[Transform] Department field ID per resource type: ${JSON.stringify(departmentFieldIdByResourceTypeId)}`);
     }
 
     if (Array.isArray(projects)) {
@@ -268,7 +283,9 @@ async function buildRawData(from, to) {
       // tracking already working — DOES include every resource_id
       // regardless of type.
       placeholderResources.forEach(r => {
-        const rawDeptIds = r.custom_fields?.['81460'] || [];
+        const resourceTypeId = typeof r.resource_type === 'object' ? r.resource_type?.id : null;
+        const fieldId = resourceTypeId != null ? departmentFieldIdByResourceTypeId[resourceTypeId] : null;
+        const rawDeptIds = (fieldId != null ? r.custom_fields?.[fieldId] : null) || r.custom_fields?.['81460'] || [];
         const deptNames = rawDeptIds
           .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
           .filter(Boolean);
@@ -353,10 +370,18 @@ async function buildRawData(from, to) {
       // to attribute it to).
       const isPlaceholderResource = isPlaceholder(rtName, job_title || resourceMeta[name]?.job_title || '');
 
-      // ── Department: from custom_fields["81460"] array of option IDs ────
+      // ── Department: from custom_fields[deptFieldId] array of option IDs ──
       // People with NO department set get "Unassigned"
       // People with MULTIPLE departments get one row per department (hours split)
-      const rawDeptIds = r.custom_fields?.['81460'] || [];
+      // Uses the correct field ID for THIS resource's own resource_type —
+      // Resource Guru defines custom fields per resource type
+      // independently, so different types can have different field IDs for
+      // what's conceptually the same "Department" concept (confirmed: this
+      // broke Placeholder resources' department resolution when hardcoded
+      // to the Person type's field id).
+      const weeklyResourceTypeId = typeof r.resource_type === 'object' ? r.resource_type?.id : null;
+      const weeklyDeptFieldId = weeklyResourceTypeId != null ? departmentFieldIdByResourceTypeId[weeklyResourceTypeId] : null;
+      const rawDeptIds = (weeklyDeptFieldId != null ? r.custom_fields?.[weeklyDeptFieldId] : null) || r.custom_fields?.['81460'] || [];
       const deptNames  = rawDeptIds
         .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
         .filter(Boolean);
