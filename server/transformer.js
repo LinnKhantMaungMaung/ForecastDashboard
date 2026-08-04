@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceDetail, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -277,31 +277,42 @@ async function buildRawData(from, to) {
       // Placeholder-type resources at all — Resource Guru appears to scope
       // utilisation reports to real staff by default, so the per-week loop
       // below never even sees them. Instead, resolve each Placeholder's
-      // department(s) here (same custom_fields lookup as real people) and
-      // compute its actual hours afterward from Bookings data directly
-      // (confirmedTentativeBreakdown), which — confirmed via SLA-rota
-      // tracking already working — DOES include every resource_id
-      // regardless of type.
-      placeholderResources.forEach(r => {
-        const resourceTypeId = typeof r.resource_type === 'object' ? r.resource_type?.id : null;
+      // department(s) here and compute its actual hours afterward from
+      // Bookings data directly (confirmedTentativeBreakdown), which —
+      // confirmed via SLA-rota tracking already working — DOES include
+      // every resource_id regardless of type.
+      //
+      // IMPORTANT: confirmed via real data that the bulk /resources list
+      // endpoint returns custom_fields=undefined for at least some
+      // Placeholder resources, even though the RG UI clearly shows a
+      // Department set on them (e.g. "Sub Con Panel Build" → "Control
+      // Panels - Notts"/"Control Panels - Telford"). So for Placeholders
+      // specifically, fetch each one's individual detail via
+      // GET /resources/:id, which should return the fuller data the UI
+      // itself reads from. Only 21 resources here, so 21 extra one-time
+      // calls is a small cost.
+      for (const r of placeholderResources) {
+        let detail = r;
+        try {
+          const fetched = await fetchResourceDetail(r.id);
+          if (fetched && fetched.custom_fields) detail = fetched;
+        } catch (err) {
+          console.warn(`[Transform] Could not fetch detail for Placeholder "${r.name}" (id ${r.id}) — falling back to bulk list data: ${err.message}`);
+        }
+        const resourceTypeId = typeof detail.resource_type === 'object' ? detail.resource_type?.id : (typeof r.resource_type === 'object' ? r.resource_type?.id : null);
         const fieldId = resourceTypeId != null ? departmentFieldIdByResourceTypeId[resourceTypeId] : null;
-        const rawDeptIds = (fieldId != null ? r.custom_fields?.[fieldId] : null) || r.custom_fields?.['81460'] || [];
+        const rawDeptIds = (fieldId != null ? detail.custom_fields?.[fieldId] : null) || detail.custom_fields?.['81460'] || [];
         const deptNames = rawDeptIds
           .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
           .filter(Boolean);
         const departments = deptNames.length > 0 ? deptNames : [getTeamFromJobTitle(getJobTitleLike(r))];
         placeholderResourceInfo.set(r.id, { name: r.name, departments });
 
-        // DIAGNOSTIC: dump exactly what's happening for "Sub Con Panel
-        // Build" specifically (known from the screenshot to have real
-        // departments "Control Panels - Notts"/"Control Panels - Telford"
-        // set in RG) — since the field ID resolved correctly but
-        // departments still ended up empty, something in custom_fields
-        // itself or the option lookup must not match. Show every step.
         if (/sub con panel build/i.test(r.name || '')) {
-          console.log(`[Transform] PLACEHOLDER DEPT DIAGNOSTIC for "${r.name}": resource_type=${JSON.stringify(r.resource_type)} resolved fieldId=${fieldId} raw custom_fields=${JSON.stringify(r.custom_fields)} rawDeptIds=${JSON.stringify(rawDeptIds)} resolved deptNames=${JSON.stringify(deptNames)} final departments=${JSON.stringify(departments)}`);
+          console.log(`[Transform] PLACEHOLDER DEPT DIAGNOSTIC for "${r.name}": detail custom_fields=${JSON.stringify(detail.custom_fields)} resolved fieldId=${fieldId} rawDeptIds=${JSON.stringify(rawDeptIds)} resolved deptNames=${JSON.stringify(deptNames)} final departments=${JSON.stringify(departments)}`);
         }
-      });
+        await sleep(100);
+      }
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
         console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder: ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
