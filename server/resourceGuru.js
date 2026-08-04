@@ -87,6 +87,25 @@ async function fetchResourceTypes() {
   return rgGet('/resource_types');
 }
 
+// All Projects — used to identify bookings under specifically-excluded
+// projects (e.g. on-call/rota bookings that shouldn't count toward
+// utilisation) by matching on project name.
+async function fetchProjects() {
+  console.log('[RG] Fetching projects (all pages)...');
+  const results = [];
+  let page = 1;
+  while (true) {
+    const data = await rgGet('/projects', { per_page: 100, page });
+    if (!Array.isArray(data) || data.length === 0) break;
+    results.push(...data);
+    if (data.length < 100) break; // last page
+    page++;
+    await sleep(200);
+  }
+  console.log(`[RG] Fetched ${results.length} projects total`);
+  return results;
+}
+
 // v2 utilisation report for a single week range
 // Returns array of resources with booked/availability totals for that period.
 // IMPORTANT: "booked" here includes BOTH confirmed AND tentative bookings —
@@ -168,6 +187,7 @@ module.exports = {
   authenticate,
   fetchResources,
   fetchResourceTypes,
+  fetchProjects,
   fetchReport,
   fetchReportRange,
   fetchBookings,
