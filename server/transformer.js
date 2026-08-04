@@ -184,6 +184,7 @@ async function buildRawData(from, to) {
   const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
   const slaProjectIdToName = new Map(); // RG project id → name, only for "SLA ROTA..." projects
   let   slaRotaProjectNames = []; // full list of known rota project names, for the dashboard's checklist UI
+  const placeholderResourceInfo = new Map(); // RG resource id → { name, departments } for Placeholder-type resources
 
   try {
     const [resources, resourceTypes, projects] = await Promise.all([
@@ -256,6 +257,23 @@ async function buildRawData(from, to) {
       const placeholderResources = resources.filter(r => {
         const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
         return isPlaceholder(rt, getJobTitleLike(r));
+      });
+      // Weekly Report data (fetchReportRange) turned out to NOT include
+      // Placeholder-type resources at all — Resource Guru appears to scope
+      // utilisation reports to real staff by default, so the per-week loop
+      // below never even sees them. Instead, resolve each Placeholder's
+      // department(s) here (same custom_fields lookup as real people) and
+      // compute its actual hours afterward from Bookings data directly
+      // (confirmedTentativeBreakdown), which — confirmed via SLA-rota
+      // tracking already working — DOES include every resource_id
+      // regardless of type.
+      placeholderResources.forEach(r => {
+        const rawDeptIds = r.custom_fields?.['81460'] || [];
+        const deptNames = rawDeptIds
+          .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
+          .filter(Boolean);
+        const departments = deptNames.length > 0 ? deptNames : [getTeamFromJobTitle(getJobTitleLike(r))];
+        placeholderResourceInfo.set(r.id, { name: r.name, departments });
       });
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
@@ -472,6 +490,46 @@ async function buildRawData(from, to) {
     await sleep(150);
     if ((i + 1) % 5 === 0) console.log(`[Transform] ${i + 1}/${weeks.length} weeks done`);
   }
+
+  // ── Unassigned (Placeholder) hours — computed from Bookings, not Report ────
+  // Confirmed: the weekly /reports/resources endpoint never includes
+  // Placeholder-type resources at all (they were correctly detected via
+  // /resources above, but the per-week loop's isPlaceholderResource branch
+  // never fired — because the resources it iterates simply never contained
+  // them). Bookings data doesn't have this limitation — every resource_id
+  // that has ANY booking appears in confirmedTentativeBreakdown regardless
+  // of resource type, which is exactly how SLA-rota tracking already works
+  // for any resource. So: for each known Placeholder, pull its hours
+  // directly from that breakdown, per week, and attribute to its team row.
+  let placeholderHoursFound = 0;
+  for (const [resId, info] of placeholderResourceInfo) {
+    for (const wk of weeks) {
+      const bd = confirmedTentativeBreakdown[`${resId}|${wk.label}`];
+      if (!bd) continue;
+      const confirmedHrs = +(bd.confirmedMins / 60).toFixed(2);
+      const tentativeHrs = +(bd.tentativeMins / 60).toFixed(2);
+      if (confirmedHrs <= 0 && tentativeHrs <= 0) continue;
+      placeholderHoursFound++;
+      const share = info.departments.length || 1;
+      for (const team of info.departments) {
+        const teamKey = `${team}|${wk.label}`;
+        if (!teamsMap[teamKey]) {
+          teamsMap[teamKey] = {
+            week: wk.label, team,
+            available_hours: 0, utilized_hours: 0, tentative_hours: 0,
+            sla_rota_hours: {}, sla_rota_tentative_hours: {},
+            unassigned_hours: 0, unassigned_tentative_hours: 0,
+            _hc: new Set(),
+          };
+        }
+        const row = teamsMap[teamKey];
+        row.unassigned_hours           = +((row.unassigned_hours || 0) + confirmedHrs / share).toFixed(2);
+        row.unassigned_tentative_hours = +((row.unassigned_tentative_hours || 0) + tentativeHrs / share).toFixed(2);
+        // Deliberately NOT added to _hc (headcount) — not a real person.
+      }
+    }
+  }
+  console.log(`[Transform] Unassigned (Placeholder) hours: ${placeholderHoursFound} resource-week entries with bookings found across ${placeholderResourceInfo.size} known Placeholder resource(s)`);
 
   const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({
     ...rest,
