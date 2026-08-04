@@ -84,6 +84,20 @@ const EXCLUDED_BOOKING_DETAILS = [
 const EXCLUDED_CLIENT_NAMES = [
   'SLA-Controls',
 ];
+// Most reliable exclusion: exact numeric Project/Client ids. Fill these in
+// directly from the "[Transform] Found N booking(s) with an exact 12h/day
+// (720min) entry..." log line — it prints the real project_id/client_id for
+// this rota straight from booking data, bypassing name-matching entirely
+// (which failed here because "SLA-ROTA NIGHTS ON CALL" turned out to be an
+// archived/inactive Project — it still shows correctly in the RG UI and on
+// existing bookings, but doesn't come back from the basic /projects list
+// fetch, which appears to only return active projects by default).
+const EXCLUDED_PROJECT_IDS = new Set([
+  // e.g. 2960367,
+]);
+const EXCLUDED_CLIENT_IDS = new Set([
+  // e.g. 280904,
+]);
 // Strips a trailing "(...)" suffix (in case a client name got copied in
 // alongside the details text from the UI display) before comparing.
 function normalizeText(name) {
@@ -133,9 +147,10 @@ function buildConfirmedTentativeBreakdown(bookings, excludedClientIds) {
   for (const b of bookings) {
     const resId = b.resource_id;
     if (resId == null) continue;
-    const excludedByClient  = b.client_id != null && excludedClientIds.has(b.client_id);
-    const excludedByDetails = bookingDetailsMatch(b);
-    if (excludedByClient || excludedByDetails) { excludedCount++; continue; }
+    const excludedByProjectId = b.project_id != null && EXCLUDED_PROJECT_IDS.has(b.project_id);
+    const excludedByClientId  = b.client_id  != null && (EXCLUDED_CLIENT_IDS.has(b.client_id) || excludedClientIds.has(b.client_id));
+    const excludedByDetails   = bookingDetailsMatch(b);
+    if (excludedByProjectId || excludedByClientId || excludedByDetails) { excludedCount++; continue; }
     const isTentative = b.tentative === true;
     for (const d of (b.durations || [])) {
       if (d.waiting) continue; // waiting list ≠ tentative — excluded from this split
@@ -230,10 +245,7 @@ async function buildRawData(from, to) {
 
     // Diagnostic: dump the RAW shape of any booking that even loosely
     // mentions "sla" or "rota" anywhere in its text fields, regardless of
-    // whether our current match logic catches it. This shows us exactly
-    // what field actually carries the identifying text/id instead of
-    // guessing at it again — client_id, project_id, details, and notes are
-    // all printed so a mismatch anywhere is visible in one shot.
+    // whether our current match logic catches it.
     const looksRelevant = (b) => {
       const haystack = `${b.details || ''} ${b.notes || ''}`.toLowerCase();
       return /sla|rota/.test(haystack);
@@ -245,7 +257,32 @@ async function buildRawData(from, to) {
         console.log(`[Transform]   resource_id=${b.resource_id} client_id=${b.client_id} project_id=${b.project_id} tentative=${b.tentative} details=${JSON.stringify(b.details)} notes=${JSON.stringify(b.notes)}`);
       });
     } else {
-      console.warn(`[Transform] NONE of the ${bookings.length} bookings fetched for ${from}→${to} mention "sla" or "rota" anywhere in details/notes. Either these bookings fall outside this date range, or the identifying text lives in a different field (e.g. a custom field, activity type, or the booker's own name) than details/notes.`);
+      console.warn(`[Transform] NONE of the ${bookings.length} bookings fetched for ${from}→${to} mention "sla" or "rota" anywhere in details/notes.`);
+    }
+
+    // Diagnostic 2: the booking itself has NO project-name field at all —
+    // only a numeric project_id — and confirmed via the RG UI that
+    // "SLA-ROTA NIGHTS ON CALL" is a real Project, yet it never showed up
+    // in our /projects list fetch. That points at it being archived/
+    // inactive, which basic list endpoints often exclude by default even
+    // though existing bookings still reference it by id. So: identify it
+    // directly by its distinctive pattern instead — 12h/day (720 min),
+    // recurring — and print the exact project_id/client_id straight from
+    // the booking data. Those numeric ids are then usable as a rock-solid
+    // exclusion key regardless of whether the project/client is archived.
+    const twelveHourCandidates = bookings.filter(b => (b.durations || []).some(d => d.duration === 720));
+    const uniqueTwelveHour = new Map(); // "projectId|clientId" -> sample booking
+    twelveHourCandidates.forEach(b => {
+      const key = `${b.project_id}|${b.client_id}`;
+      if (!uniqueTwelveHour.has(key)) uniqueTwelveHour.set(key, b);
+    });
+    if (uniqueTwelveHour.size) {
+      console.log(`[Transform] Found ${twelveHourCandidates.length} booking(s) with an exact 12h/day (720min) entry, across ${uniqueTwelveHour.size} distinct project/client id combo(s):`);
+      [...uniqueTwelveHour.values()].slice(0, 10).forEach(b => {
+        console.log(`[Transform]   project_id=${b.project_id} client_id=${b.client_id} tentative=${b.tentative} first_date=${b.durations[0]?.date} details=${JSON.stringify(b.details)}`);
+      });
+    } else {
+      console.warn(`[Transform] No booking with an exact 720-minute (12h) day found in this date range — "SLA-ROTA NIGHTS ON CALL" may not fall within ${from}→${to}, or its per-day duration isn't exactly 720.`);
     }
 
     confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedClientIds);
