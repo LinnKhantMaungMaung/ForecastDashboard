@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, fetchDowntimes, fetchDowntimeTypes, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -149,55 +149,15 @@ function buildConfirmedTentativeBreakdown(bookings, slaProjectIdToName) {
   return breakdown;
 }
 
-// ── Time Off / Downtime hours per resource per week ──────────────────────────
-// Downtimes are a SEPARATE Resource Guru resource from Bookings entirely
-// (confirmed via the RG UI's "Time Off" popup — a distinct black-bar style
-// from colored project Bookings). Each event has resource_ids (an array —
-// one event can cover several people), a from/to date range, and
-// start_time/end_time in minutes-from-midnight applying per day in that
-// range. Only "Approved" (not Pending/Declined) and non-deleted events count
-// as real absence.
-//
-// This is currently DIAGNOSTIC ONLY — computed and logged so we can compare
-// against Resource Guru's own "availability" figure (see the comparison in
-// buildRawData below) before deciding whether availability needs a manual
-// adjustment. If RG's own Report already nets Downtime out of availability
-// (very plausible — that's the whole point of tracking Time Off), applying
-// our own subtraction on top would double-count and make things WRONG in
-// the other direction. Confirm from real data first.
-//
-// Returns: { hours: {"resourceId|weekLabel": hours}, types: {"resourceId|weekLabel": Set<typeName>} }
-function buildDowntimeHoursByResourceWeek(downtimes, downtimeTypeNameById = {}) {
-  const hours = {};
-  const types = {};
-  let approvedCount = 0, skippedCount = 0;
-  for (const dt of downtimes) {
-    if (dt.deleted) { skippedCount++; continue; }
-    if (dt.state && dt.state !== 'Approved') { skippedCount++; continue; }
-    approvedCount++;
-    const typeName = downtimeTypeNameById[dt.downtime_type_id] || (dt.downtime_type_id == null ? '(no type)' : `type#${dt.downtime_type_id}`);
-    const dayMins = Math.max(0, (dt.end_time ?? 1440) - (dt.start_time ?? 0));
-    const dayHours = dayMins / 60;
-    const start = new Date(dt.from + 'T00:00:00Z');
-    const end   = new Date(dt.to   + 'T00:00:00Z');
-    for (const resId of (dt.resource_ids || [])) {
-      const cur = new Date(start);
-      while (cur <= end) {
-        const dow = cur.getUTCDay();
-        if (dow !== 0 && dow !== 6) { // weekdays only
-          const wk = toWeekLabel(cur);
-          const key = `${resId}|${wk}`;
-          hours[key] = (hours[key] || 0) + dayHours;
-          if (!types[key]) types[key] = new Set();
-          types[key].add(typeName);
-        }
-        cur.setUTCDate(cur.getUTCDate() + 1);
-      }
-    }
-  }
-  console.log(`[Transform] Downtime (Time Off): ${approvedCount} approved event(s) processed, ${skippedCount} skipped (deleted or not Approved)`);
-  return { hours, types };
-}
+// NOTE ON HOLIDAY/TIME-OFF HANDLING: investigated whether Resource Guru's
+// "availability" figure already nets out approved Time Off (a separate RG
+// resource from Bookings — the "Downtimes" API). Confirmed against real
+// account data: it does, proportionally, for both partial-week and
+// full-week absences. E.g. multiple people taking 1/2/3 days off all showed
+// availability implying the exact same full-week baseline for their
+// individual schedule (e.g. 45.0h/week people: 1 day off -> 36h left, 2
+// days off -> 27h left, 3 days off -> 18h left — all exactly proportional).
+// No adjustment needed here — availability is already correct as-is.
 
 async function buildRawData(from, to) {
   const weeks = buildWeeks(from, to);
@@ -268,6 +228,26 @@ async function buildRawData(from, to) {
         if (r.id != null) resourceIdToName[r.id] = r.name;
       });
       console.log(`[Transform] Resource metadata: ${Object.keys(resourceMeta).length} resources`);
+
+      // DIAGNOSTIC: how many resources are detected as Placeholder (tracked
+      // as unassigned team-level work) vs everything else, and the full set
+      // of distinct resource_type names seen — so a naming mismatch (e.g.
+      // this account calls it something other than "Placeholder") is
+      // visible immediately instead of silently showing nothing.
+      const allTypeNames = [...new Set(resources.map(r => {
+        const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
+        return rt || 'Person';
+      }))].sort();
+      const placeholderResources = resources.filter(r => {
+        const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
+        return isPlaceholder(rt);
+      });
+      console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
+      if (placeholderResources.length) {
+        console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder: ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
+      } else {
+        console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 resources matched isPlaceholder() out of ${resources.length} total. If you have Placeholder-type resources in Resource Guru, check the resource_type names listed above — the match is currently /placeholder/i, so a different naming (e.g. "Generic", "TBD", "Unassigned") would need the regex updated.`);
+      }
     }
   } catch (err) {
     console.warn('[Transform] Metadata fetch failed:', err.message);
@@ -284,27 +264,6 @@ async function buildRawData(from, to) {
     console.log(`[Transform] Confirmed/tentative/SLA breakdown built from ${bookings.length} bookings`);
   } catch (err) {
     console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative and SLA hours will read as 0):', err.message);
-  }
-
-  // Time Off (Downtime) — fetched once for the whole range, same pattern as
-  // Bookings. DIAGNOSTIC ONLY for now (see comparison against RG's own
-  // "availability" figure in the per-resource loop below) — not yet applied
-  // to available_hours until we've confirmed from real data whether RG
-  // already nets it out automatically.
-  let downtimeHoursByResourceWeek = {};
-  let downtimeTypesByResourceWeek = {};
-  try {
-    const [downtimes, downtimeTypes] = await Promise.all([
-      fetchDowntimes(from, to),
-      fetchDowntimeTypes().catch(() => []),
-    ]);
-    const downtimeTypeNameById = {};
-    (downtimeTypes || []).forEach(t => { downtimeTypeNameById[t.id] = t.name; });
-    const result = buildDowntimeHoursByResourceWeek(downtimes, downtimeTypeNameById);
-    downtimeHoursByResourceWeek = result.hours;
-    downtimeTypesByResourceWeek = result.types;
-  } catch (err) {
-    console.warn('[Transform] Downtimes fetch failed — holiday/leave diagnostic will be skipped:', err.message);
   }
 
   const teamsMap     = {};
@@ -369,21 +328,6 @@ async function buildRawData(from, to) {
       // ── Hours (RG reports in MINUTES) ───────────────────────────────────
       const totalAvail = +((r.availability || 0) / 60).toFixed(2);
 
-      // HOLIDAY/DOWNTIME DIAGNOSTIC: compare our own computed downtime
-      // hours (from the real Time Off/Downtime API) against RG's own
-      // "availability" figure for this exact resource+week. This tells us
-      // definitively whether RG already nets Downtime out of availability:
-      //   - if availability looks LOW/reduced despite full nominal capacity
-      //     → RG already handles it, no fix needed here.
-      //   - if availability looks FULL/unreduced despite known downtime
-      //     → RG does NOT net it out automatically, and we need to manually
-      //     subtract our computed downtime hours ourselves.
-      const downtimeKey = `${r.id}|${wk.label}`;
-      const downtimeHrsThisWeek = downtimeHoursByResourceWeek[downtimeKey];
-      if (downtimeHrsThisWeek > 0) {
-        const typeNames = [...(downtimeTypesByResourceWeek[downtimeKey] || [])].join('+') || 'unknown';
-        console.log(`[Transform] DOWNTIME DIAGNOSTIC: ${name} has ${downtimeHrsThisWeek.toFixed(1)}h of approved Time Off [type: ${typeNames}] in week ${wk.label} — RG reports "availability"=${totalAvail}h for that same week. ${totalAvail < 5 ? '(looks ALREADY reduced — RG may be handling this correctly)' : '(looks FULL/unreduced — RG likely does NOT net this out automatically)'}`);
-      }
 
       // Confirmed / tentative split now comes from real Bookings data, not
       // the Report endpoint's "booked" (which is confirmed+tentative
@@ -515,6 +459,23 @@ async function buildRawData(from, to) {
   const teamNames = [...new Set(teams.map(t => t.team))].sort();
   console.log(`[Transform] Done — ${teams.length} team-week rows, ${Object.keys(engineersMap).length} engineer-week rows`);
   console.log(`[Transform] Teams: ${teamNames.join(', ')}`);
+
+  // PLACEHOLDER DIAGNOSTIC (part 2): total unassigned hours that actually
+  // made it into the final data, per team. If Placeholder resources WERE
+  // detected above but this shows all zeros, it means they simply have no
+  // bookings in this specific date range (not a bug) — check a range where
+  // you know a Placeholder has bookings, like the one in your screenshot.
+  const unassignedTotals = {};
+  teams.forEach(t => {
+    const total = (t.unassigned_hours || 0) + (t.unassigned_tentative_hours || 0);
+    if (total > 0) unassignedTotals[t.team] = +((unassignedTotals[t.team] || 0) + total).toFixed(2);
+  });
+  const unassignedEntries = Object.entries(unassignedTotals);
+  if (unassignedEntries.length) {
+    console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: unassigned hours found in final data for ${from}→${to}: ${unassignedEntries.map(([t,h]) => `${t}=${h}h`).join(', ')}`);
+  } else {
+    console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 unassigned hours in the final data for ${from}→${to} across ALL teams. See the earlier PLACEHOLDER DIAGNOSTIC line for whether any Placeholder resources were detected at all — if some were detected but this is still 0, they simply have no bookings in this specific date range.`);
+  }
 
   return {
     teams:          teams.sort((a, b) => a.week.localeCompare(b.week) || a.team.localeCompare(b.team)),
