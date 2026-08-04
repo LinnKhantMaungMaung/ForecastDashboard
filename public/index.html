@@ -541,6 +541,10 @@
       <div><div class="settings-row-label">Include Tentative Bookings</div><div class="settings-row-desc">Waiting list / tentative hours</div></div>
       <label class="toggle"><input type="checkbox" id="s-tentative" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Include SLA-Rota Bookings</div><div class="settings-row-desc">Standing on-call rotas (e.g. SLA-Controls, SLA-Helix) — off by default so they don't inflate real project utilisation</div></div>
+      <label class="toggle"><input type="checkbox" id="s-includeSla" onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
   </div>
   <div class="settings-section">
     <div class="settings-section-title">Resource Type</div>
@@ -654,7 +658,7 @@ let phaseCounter = 0;
 let editingPhaseSnapshots = {};
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false, includeSla:false };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
@@ -680,6 +684,7 @@ function applySettings() {
     staff:       document.getElementById('s-staff').checked,
     showDates:   document.getElementById('s-showDates').checked,
     showCategoryTags: document.getElementById('s-showCategoryTags').checked,
+    includeSla:  document.getElementById('s-includeSla').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
@@ -732,7 +737,12 @@ function getFilteredTeams() {
     // Person may belong to multiple departments — contribute to each
     const depts = r.departments && r.departments.length > 0 ? r.departments : [r.team];
     const share = depts.length;
-    const uHrs = (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
+    let uHrs = (SETTINGS.confirmed ? r.utilized_hours:0) + (SETTINGS.tentative ? (r.tentative_hours||0):0);
+    // SLA-rota bookings (standing on-call rotas) are tracked separately server-side
+    // and excluded from utilisation by default — only added back in if toggled on.
+    if (SETTINGS.includeSla) {
+      uHrs += (SETTINGS.confirmed ? (r.sla_hours||0) : 0) + (SETTINGS.tentative ? (r.sla_tentative_hours||0) : 0);
+    }
     for (const team of depts) {
       if (HIDDEN_DEPTS.has(team)) continue; // department hidden
       const key = team+'|'+r.week;
@@ -751,12 +761,14 @@ function getFilteredEngineers() {
     // Also filter by department visibility
     const depts = e.departments && e.departments.length > 0 ? e.departments : [e.team];
     return depts.some(d => !HIDDEN_DEPTS.has(d));
-  }).map(e=>({
-    ...e,
-    // Fix tentative: add waiting_list hours when toggle is on
-    utilized_hours: (SETTINGS.confirmed ? (e.utilized_hours||0) : 0)
-                  + (SETTINGS.tentative  ? (e.tentative_hours||0) : 0),
-  }));
+  }).map(e=>{
+    let utilized_hours = (SETTINGS.confirmed ? (e.utilized_hours||0) : 0)
+                       + (SETTINGS.tentative  ? (e.tentative_hours||0) : 0);
+    if (SETTINGS.includeSla) {
+      utilized_hours += (SETTINGS.confirmed ? (e.sla_hours||0) : 0) + (SETTINGS.tentative ? (e.sla_tentative_hours||0) : 0);
+    }
+    return { ...e, utilized_hours };
+  });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
