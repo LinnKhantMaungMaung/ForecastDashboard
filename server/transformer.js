@@ -72,8 +72,8 @@ function isNonPerson(rtName) {
 // bookings that would otherwise inflate real project utilisation. Add more
 // names here if other rota-style projects need the same treatment.
 const EXCLUDED_PROJECT_NAMES = [
-  'SLA-ROTA NIGHTS ON CALL',
-  'SLA ROTA- CONTROLS',
+  'SLA-ROTA NIGHTS ON CALL (SLA-Controls)',
+  'SLA ROTA- CONTROLS (SLA-Controls)',
 ];
 function normalizeProjectName(name) {
   return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
