@@ -166,14 +166,16 @@ function buildConfirmedTentativeBreakdown(bookings, slaProjectIdToName) {
 // our own subtraction on top would double-count and make things WRONG in
 // the other direction. Confirm from real data first.
 //
-// Returns: { "resourceId|weekLabel": hours }
-function buildDowntimeHoursByResourceWeek(downtimes) {
-  const map = {};
+// Returns: { hours: {"resourceId|weekLabel": hours}, types: {"resourceId|weekLabel": Set<typeName>} }
+function buildDowntimeHoursByResourceWeek(downtimes, downtimeTypeNameById = {}) {
+  const hours = {};
+  const types = {};
   let approvedCount = 0, skippedCount = 0;
   for (const dt of downtimes) {
     if (dt.deleted) { skippedCount++; continue; }
     if (dt.state && dt.state !== 'Approved') { skippedCount++; continue; }
     approvedCount++;
+    const typeName = downtimeTypeNameById[dt.downtime_type_id] || (dt.downtime_type_id == null ? '(no type)' : `type#${dt.downtime_type_id}`);
     const dayMins = Math.max(0, (dt.end_time ?? 1440) - (dt.start_time ?? 0));
     const dayHours = dayMins / 60;
     const start = new Date(dt.from + 'T00:00:00Z');
@@ -185,14 +187,16 @@ function buildDowntimeHoursByResourceWeek(downtimes) {
         if (dow !== 0 && dow !== 6) { // weekdays only
           const wk = toWeekLabel(cur);
           const key = `${resId}|${wk}`;
-          map[key] = (map[key] || 0) + dayHours;
+          hours[key] = (hours[key] || 0) + dayHours;
+          if (!types[key]) types[key] = new Set();
+          types[key].add(typeName);
         }
         cur.setUTCDate(cur.getUTCDate() + 1);
       }
     }
   }
   console.log(`[Transform] Downtime (Time Off): ${approvedCount} approved event(s) processed, ${skippedCount} skipped (deleted or not Approved)`);
-  return map;
+  return { hours, types };
 }
 
 async function buildRawData(from, to) {
@@ -288,9 +292,17 @@ async function buildRawData(from, to) {
   // to available_hours until we've confirmed from real data whether RG
   // already nets it out automatically.
   let downtimeHoursByResourceWeek = {};
+  let downtimeTypesByResourceWeek = {};
   try {
-    const downtimes = await fetchDowntimes(from, to);
-    downtimeHoursByResourceWeek = buildDowntimeHoursByResourceWeek(downtimes);
+    const [downtimes, downtimeTypes] = await Promise.all([
+      fetchDowntimes(from, to),
+      fetchDowntimeTypes().catch(() => []),
+    ]);
+    const downtimeTypeNameById = {};
+    (downtimeTypes || []).forEach(t => { downtimeTypeNameById[t.id] = t.name; });
+    const result = buildDowntimeHoursByResourceWeek(downtimes, downtimeTypeNameById);
+    downtimeHoursByResourceWeek = result.hours;
+    downtimeTypesByResourceWeek = result.types;
   } catch (err) {
     console.warn('[Transform] Downtimes fetch failed — holiday/leave diagnostic will be skipped:', err.message);
   }
@@ -369,7 +381,8 @@ async function buildRawData(from, to) {
       const downtimeKey = `${r.id}|${wk.label}`;
       const downtimeHrsThisWeek = downtimeHoursByResourceWeek[downtimeKey];
       if (downtimeHrsThisWeek > 0) {
-        console.log(`[Transform] DOWNTIME DIAGNOSTIC: ${name} has ${downtimeHrsThisWeek.toFixed(1)}h of approved Time Off in week ${wk.label} — RG reports "availability"=${totalAvail}h for that same week. ${totalAvail < 5 ? '(looks ALREADY reduced — RG may be handling this correctly)' : '(looks FULL/unreduced — RG likely does NOT net this out automatically)'}`);
+        const typeNames = [...(downtimeTypesByResourceWeek[downtimeKey] || [])].join('+') || 'unknown';
+        console.log(`[Transform] DOWNTIME DIAGNOSTIC: ${name} has ${downtimeHrsThisWeek.toFixed(1)}h of approved Time Off [type: ${typeNames}] in week ${wk.label} — RG reports "availability"=${totalAvail}h for that same week. ${totalAvail < 5 ? '(looks ALREADY reduced — RG may be handling this correctly)' : '(looks FULL/unreduced — RG likely does NOT net this out automatically)'}`);
       }
 
       // Confirmed / tentative split now comes from real Bookings data, not
