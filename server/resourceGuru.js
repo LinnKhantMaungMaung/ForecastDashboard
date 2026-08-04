@@ -68,14 +68,22 @@ async function rgGet(path, params = {}) {
 async function fetchResources() {
   console.log('[RG] Fetching resources (all pages)...');
   const results = [];
-  let page = 1;
+  const limit = 100;
+  let offset = 0;
   while (true) {
-    const data = await rgGet('/resources', { per_page: 100, page });
+    const data = await rgGet('/resources', { limit, offset });
     if (!Array.isArray(data) || data.length === 0) break;
     results.push(...data);
-    if (data.length < 100) break; // last page
-    page++;
-    await sleep(200);
+    // IMPORTANT: advance by however many we actually got back, not by the
+    // requested limit, and only stop on a genuinely EMPTY page. This is the
+    // exact same bug already found and fixed for /projects and /clients —
+    // "Fetched 50 resources total" was the same suspicious round-number
+    // symptom that turned out to mean the API was silently capping the
+    // page size below what we requested (per_page=100 was being ignored),
+    // so anything past position 50 (including 3 Placeholder resources
+    // confirmed to exist in this account) was silently never fetched.
+    offset += data.length;
+    await sleep(150);
   }
   console.log(`[RG] Fetched ${results.length} resources total`);
   return results;
