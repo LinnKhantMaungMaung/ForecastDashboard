@@ -678,6 +678,13 @@ let CONTRACTOR_OVERRIDES = new Set();
 // count its hours — mirrors the per-employee/per-department checklist
 // pattern rather than one blanket toggle.
 let INCLUDED_SLA_PROJECTS = new Set();
+// Currently active custom date range (null = using the server's default
+// range). Tracked so a page refresh, or the periodic background refresh
+// below, doesn't silently snap back to the default range while a custom
+// one is active — both previously always re-fetched the default with no
+// memory of what the user had selected.
+let CURRENT_RANGE_FROM = null;
+let CURRENT_RANGE_TO   = null;
 // Saved highlighted team/dataset label
 let savedHighlight = null;
 
@@ -2368,6 +2375,8 @@ function saveState() {
       hiddenPeople:            [...HIDDEN_PEOPLE],
       contractorOverrides:     [...CONTRACTOR_OVERRIDES],
       includedSlaProjects:     [...INCLUDED_SLA_PROJECTS],
+      currentRangeFrom:        CURRENT_RANGE_FROM,
+      currentRangeTo:          CURRENT_RANGE_TO,
       savedHighlight:          savedHighlight,
       heatmapWeekFilter:       heatmapWeekFilter,
       heatmapDateFrom:         document.getElementById('heatmap-date-from')?.value||'',
@@ -2409,6 +2418,14 @@ function restoreState() {
     if (Array.isArray(s.hiddenPeople))        HIDDEN_PEOPLE        = new Set(s.hiddenPeople);
     if (Array.isArray(s.contractorOverrides)) CONTRACTOR_OVERRIDES = new Set(s.contractorOverrides);
     if (Array.isArray(s.includedSlaProjects)) INCLUDED_SLA_PROJECTS = new Set(s.includedSlaProjects);
+    if (s.currentRangeFrom && s.currentRangeTo) {
+      CURRENT_RANGE_FROM = s.currentRangeFrom;
+      CURRENT_RANGE_TO   = s.currentRangeTo;
+      const fromEl = document.getElementById('fetch-from-date');
+      const toEl   = document.getElementById('fetch-to-date');
+      if (fromEl) fromEl.value = s.currentRangeFrom;
+      if (toEl)   toEl.value   = s.currentRangeTo;
+    }
     if (s.savedHighlight !== undefined)       savedHighlight       = s.savedHighlight;
     if (s.heatmapWeekFilter)                  heatmapWeekFilter    = s.heatmapWeekFilter;
     if (s.heatmapDateFrom) { const el=document.getElementById('heatmap-date-from'); if(el) el.value=s.heatmapDateFrom; }
@@ -2719,8 +2736,14 @@ async function fetchCustomRange() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     RAW = data; window.RAW = RAW;
+    // Remember this as the active range so a page refresh, or the periodic
+    // background refresh, keeps using it instead of silently reverting to
+    // the server's default range.
+    CURRENT_RANGE_FROM = from;
+    CURRENT_RANGE_TO   = to;
     init();
     setTimeout(restoreState, 100);
+    saveState();
     if (status) status.textContent = `✓ Loaded ${[...new Set(data.teams.map(r=>r.week))].length} weeks`;
   } catch(err) {
     if (status) status.textContent = `✗ Error: ${err.message}`;
@@ -2739,12 +2762,17 @@ async function resetToDefaultRange() {
     if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
     const data = await res2.json();
     RAW = data; window.RAW = RAW;
+    // Back to using the server's default range — clear the tracked custom
+    // range so refresh/background-refresh don't try to re-fetch it.
+    CURRENT_RANGE_FROM = null;
+    CURRENT_RANGE_TO   = null;
     ['fetch-from-date','fetch-to-date'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
     init();
     setTimeout(restoreState, 100);
+    saveState();
     if (status) status.textContent = `✓ Reset to default (${[...new Set(data.teams.map(r=>r.week))].length} weeks)`;
   } catch(err) {
     if (status) status.textContent = `✗ Error: ${err.message}`;
@@ -2756,7 +2784,14 @@ async function resetToDefaultRange() {
 async function loadLiveData(){
   setStatus('loading','Fetching from Resource Guru...');
   try{
-    const res=await fetch('/api/utilisation');
+    // Respect an active custom range instead of always fetching the
+    // server's default — this is what previously caused the visible range
+    // to silently snap back to default, both on page refresh and on this
+    // function's own periodic background refresh below.
+    const url = (CURRENT_RANGE_FROM && CURRENT_RANGE_TO)
+      ? `/api/utilisation?from=${CURRENT_RANGE_FROM}&to=${CURRENT_RANGE_TO}`
+      : '/api/utilisation';
+    const res=await fetch(url);
     if(!res.ok)throw new Error(`HTTP ${res.status}`);
     const data=await res.json();
     // Only re-render if data has changed
@@ -2783,6 +2818,17 @@ async function loadLiveData(){
   }
 }
 
+// Restore the last active custom date range (if any) BEFORE the very first
+// fetch — otherwise a page refresh would fetch the default range first and
+// only correct itself after restoreState() runs post-load, which is exactly
+// the "date keeps going back to default on refresh" symptom this fixes.
+try {
+  const savedForRange = JSON.parse(localStorage.getItem('rg_state') || 'null');
+  if (savedForRange?.currentRangeFrom && savedForRange?.currentRangeTo) {
+    CURRENT_RANGE_FROM = savedForRange.currentRangeFrom;
+    CURRENT_RANGE_TO   = savedForRange.currentRangeTo;
+  }
+} catch(e) {}
 loadLiveData();
 </script>
 </body>
