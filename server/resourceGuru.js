@@ -106,6 +106,25 @@ async function fetchProjects() {
   return results;
 }
 
+// All Clients — some bookings aren't tied to a Project at all, only a
+// Client (e.g. standing rota bookings), so this is needed to resolve
+// client-based exclusions too.
+async function fetchClients() {
+  console.log('[RG] Fetching clients (all pages)...');
+  const results = [];
+  let page = 1;
+  while (true) {
+    const data = await rgGet('/clients', { per_page: 100, page });
+    if (!Array.isArray(data) || data.length === 0) break;
+    results.push(...data);
+    if (data.length < 100) break; // last page
+    page++;
+    await sleep(200);
+  }
+  console.log(`[RG] Fetched ${results.length} clients total`);
+  return results;
+}
+
 // v2 utilisation report for a single week range
 // Returns array of resources with booked/availability totals for that period.
 // IMPORTANT: "booked" here includes BOTH confirmed AND tentative bookings —
@@ -188,6 +207,7 @@ module.exports = {
   fetchResources,
   fetchResourceTypes,
   fetchProjects,
+  fetchClients,
   fetchReport,
   fetchReportRange,
   fetchBookings,
