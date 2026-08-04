@@ -632,6 +632,7 @@
     </div>
     <button onclick="fetchCustomRange()" style="width:100%;padding:9px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:'Syne',sans-serif">Apply & Fetch Data</button>
     <button onclick="resetToDefaultRange()" style="width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;font-size:12px;margin-top:6px;font-family:'Syne',sans-serif">Reset to Default (Apr–Oct)</button>
+    <button onclick="refreshNow()" style="width:100%;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;font-size:12px;margin-top:6px;font-family:'Syne',sans-serif">🔄 Refresh Now (get latest from Resource Guru)</button>
     <div id="fetch-status" style="font-size:11px;color:var(--muted);margin-top:8px;font-family:'DM Mono',monospace;text-align:center"></div>
   </div>
 
@@ -2812,6 +2813,31 @@ async function resetToDefaultRange() {
 
 
 // ── Live data loading ─────────────────────────────────────────────────────────
+// Manual "Refresh Now" — forces the server to bypass its cache (refresh=1)
+// and pull fresh data straight from Resource Guru for whatever range is
+// currently active. Use this right after making a change in RG itself (a
+// new booking, a new holiday, etc.) to verify it immediately, rather than
+// waiting for the server's cache TTL to naturally expire or for the next
+// scheduled background poll.
+async function refreshNow(){
+  const status = document.getElementById('fetch-status');
+  if (status) { status.style.color = 'var(--muted)'; status.textContent = 'Refreshing from Resource Guru...'; }
+  try {
+    const url = (CURRENT_RANGE_FROM && CURRENT_RANGE_TO)
+      ? `/api/utilisation?refresh=1&from=${CURRENT_RANGE_FROM}&to=${CURRENT_RANGE_TO}`
+      : '/api/utilisation?refresh=1';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    RAW = data; window.RAW = RAW;
+    init();
+    setTimeout(restoreState, 100);
+    if (status) { status.style.color = 'var(--green)'; status.textContent = `✓ Refreshed — ${[...new Set(data.teams.map(r=>r.week))].length} weeks, fetched ${new Date(data.meta?.fetched_at).toLocaleTimeString()}`; }
+  } catch(err) {
+    if (status) { status.style.color = 'var(--red)'; status.textContent = `✗ Refresh failed: ${err.message}`; }
+  }
+}
+
 async function loadLiveData(){
   setStatus('loading','Fetching from Resource Guru...');
   try{
