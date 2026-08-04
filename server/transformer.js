@@ -282,37 +282,52 @@ async function buildRawData(from, to) {
       // confirmed via SLA-rota tracking already working — DOES include
       // every resource_id regardless of type.
       //
-      // IMPORTANT: confirmed via real data that the bulk /resources list
-      // endpoint returns custom_fields=undefined for at least some
-      // Placeholder resources, even though the RG UI clearly shows a
-      // Department set on them (e.g. "Sub Con Panel Build" → "Control
-      // Panels - Notts"/"Control Panels - Telford"). So for Placeholders
-      // specifically, fetch each one's individual detail via
-      // GET /resources/:id, which should return the fuller data the UI
-      // itself reads from. Only 21 resources here, so 21 extra one-time
-      // calls is a small cost.
-      for (const r of placeholderResources) {
-        let detail = r;
-        try {
-          const fetched = await fetchResourceDetail(r.id);
-          if (fetched && fetched.custom_fields) detail = fetched;
-        } catch (err) {
-          console.warn(`[Transform] Could not fetch detail for Placeholder "${r.name}" (id ${r.id}) — falling back to bulk list data: ${err.message}`);
+      // IMPORTANT: confirmed via real data that Resource Guru's API simply
+      // does not expose custom_fields for Placeholder resources through
+      // ANY endpoint we can reach — neither the bulk /resources list NOR
+      // the individual /resources/:id detail endpoint returns it, even
+      // though the RG UI clearly shows a Department set on them. Since
+      // there's no reliable API path to this data, fall back to inferring
+      // department from the resource's own NAME — these names are
+      // consistently department-suggestive (e.g. "U PLC Commissioning",
+      // "U Design", "HELIX Escalation Rota") — matched against the
+      // account's real department list, longest names checked first so
+      // e.g. "PLC - Amazon" wins over the more generic "PLC" when both
+      // could apply.
+      const realDepartmentNames = [...new Set(Object.values(deptOptionLookup))]
+        .sort((a, b) => b.length - a.length);
+      function inferDepartmentFromName(name) {
+        const lower = (name || '').toLowerCase();
+        for (const dept of realDepartmentNames) {
+          if (lower.includes(dept.toLowerCase())) return dept;
         }
-        const resourceTypeId = typeof detail.resource_type === 'object' ? detail.resource_type?.id : (typeof r.resource_type === 'object' ? r.resource_type?.id : null);
+        // Manual keyword fallbacks for known abbreviations/synonyms that
+        // don't literally contain the full department name as a substring.
+        if (/\bamazon\b/i.test(name))               return 'PLC - Amazon';
+        if (/\brobot/i.test(name))                   return 'Robotics';
+        if (/\binstall\b/i.test(name))                return 'Electrical Installation';
+        if (/\bhelix\b/i.test(name))                 return 'HELIX';
+        if (/\bproject management\b/i.test(name))    return 'Projects';
+        if (/\bpanel\b|\bsub ?con\b/i.test(name))    return 'Control Panels - Notts';
+        if (/\bplc\b|\bcontrols\b/i.test(name))      return 'PLC';
+        if (/\bservice\b|\bppm\b/i.test(name))       return 'Service';
+        if (/\bdesign\b/i.test(name))                return 'Design';
+        return null; // genuinely unknown — falls back to "Unassigned" below
+      }
+
+      for (const r of placeholderResources) {
+        const resourceTypeId = typeof r.resource_type === 'object' ? r.resource_type?.id : null;
         const fieldId = resourceTypeId != null ? departmentFieldIdByResourceTypeId[resourceTypeId] : null;
-        const rawDeptIds = (fieldId != null ? detail.custom_fields?.[fieldId] : null) || detail.custom_fields?.['81460'] || [];
-        const deptNames = rawDeptIds
+        const rawDeptIds = (fieldId != null ? r.custom_fields?.[fieldId] : null) || r.custom_fields?.['81460'] || [];
+        const deptNamesFromApi = rawDeptIds
           .map(id => deptOptionLookup[Number(id)] || deptOptionLookup[String(id)])
           .filter(Boolean);
-        const departments = deptNames.length > 0 ? deptNames : [getTeamFromJobTitle(getJobTitleLike(r))];
+        const inferred = inferDepartmentFromName(r.name);
+        const departments = deptNamesFromApi.length > 0 ? deptNamesFromApi
+                           : (inferred ? [inferred] : [getTeamFromJobTitle(getJobTitleLike(r))]);
         placeholderResourceInfo.set(r.id, { name: r.name, departments });
-
-        if (/sub con panel build/i.test(r.name || '')) {
-          console.log(`[Transform] PLACEHOLDER DEPT DIAGNOSTIC for "${r.name}": detail custom_fields=${JSON.stringify(detail.custom_fields)} resolved fieldId=${fieldId} rawDeptIds=${JSON.stringify(rawDeptIds)} resolved deptNames=${JSON.stringify(deptNames)} final departments=${JSON.stringify(departments)}`);
-        }
-        await sleep(100);
       }
+      console.log(`[Transform] PLACEHOLDER department resolution (API data unavailable — inferred from name): ${[...placeholderResourceInfo.values()].map(v => `"${v.name}"→${v.departments.join('+')}`).join(', ')}`);
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
         console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder: ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
