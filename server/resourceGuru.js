@@ -93,14 +93,23 @@ async function fetchResourceTypes() {
 async function fetchProjects() {
   console.log('[RG] Fetching projects (all pages)...');
   const results = [];
-  let page = 1;
+  const limit = 100;
+  let offset = 0;
   while (true) {
-    const data = await rgGet('/projects', { per_page: 100, page });
+    const data = await rgGet('/projects', { limit, offset });
     if (!Array.isArray(data) || data.length === 0) break;
     results.push(...data);
-    if (data.length < 100) break; // last page
-    page++;
-    await sleep(200);
+    // IMPORTANT: advance by however many we actually got back, not by the
+    // requested limit, and only stop on a genuinely EMPTY page. If the API
+    // silently caps the page size below what we requested, stopping on
+    // "data.length < limit" ends pagination early and silently drops
+    // everything past that point — this is exactly what happened before:
+    // 50 projects came back and we assumed that was everything, but the
+    // account has more, including several archived/inactive ones that
+    // never appeared. One extra request at the very end is a small cost
+    // for guaranteeing nothing gets missed.
+    offset += data.length;
+    await sleep(150);
   }
   console.log(`[RG] Fetched ${results.length} projects total`);
   return results;
@@ -112,14 +121,14 @@ async function fetchProjects() {
 async function fetchClients() {
   console.log('[RG] Fetching clients (all pages)...');
   const results = [];
-  let page = 1;
+  const limit = 100;
+  let offset = 0;
   while (true) {
-    const data = await rgGet('/clients', { per_page: 100, page });
+    const data = await rgGet('/clients', { limit, offset });
     if (!Array.isArray(data) || data.length === 0) break;
     results.push(...data);
-    if (data.length < 100) break; // last page
-    page++;
-    await sleep(200);
+    offset += data.length; // see note in fetchProjects() above
+    await sleep(150);
   }
   console.log(`[RG] Fetched ${results.length} clients total`);
   return results;
