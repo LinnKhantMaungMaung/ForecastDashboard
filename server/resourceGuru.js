@@ -89,6 +89,16 @@ async function fetchResources() {
   return results;
 }
 
+// Individual resource detail — confirmed via real data that the bulk
+// /resources list endpoint omits custom_fields entirely for at least some
+// Placeholder-type resources (even though the RG UI clearly shows a
+// Department set on them), so the list alone isn't reliable for reading
+// custom fields on these. This per-resource endpoint should return the
+// fuller detail the UI itself reads from.
+async function fetchResourceDetail(resourceId) {
+  return rgGet(`/resources/${resourceId}`);
+}
+
 // All resource types — tells us which IDs are Contractor, Equipment etc
 async function fetchResourceTypes() {
   console.log('[RG] Fetching resource types...');
@@ -282,6 +292,7 @@ async function fetchBookings(from, to) {
 module.exports = {
   authenticate,
   fetchResources,
+  fetchResourceDetail,
   fetchResourceTypes,
   fetchProjects,
   fetchClients,
