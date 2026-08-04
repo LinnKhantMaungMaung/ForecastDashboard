@@ -62,8 +62,11 @@ function getSeniority(job_title) {
   return 'staff';
 }
 
-function isNonPerson(rtName) {
-  return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
+function isEquipmentOrRoom(rtName) {
+  return /vehicle|conference|meeting room|miscellaneous/i.test(rtName || '');
+}
+function isPlaceholder(rtName) {
+  return /placeholder/i.test(rtName || '');
 }
 
 // ── SLA-rota bookings ────────────────────────────────────────────────────────
@@ -193,7 +196,7 @@ async function buildRawData(from, to) {
           ? r.resource_type?.name
           : r.resource_type || 'Person';
         resourceMeta[r.name] = {
-          isEquipment: isNonPerson(rtName),
+          isEquipment: isEquipmentOrRoom(rtName),
           seniority:   getSeniority(r.job_title),
           job_title:   r.job_title || '',
           rtName,
@@ -215,6 +218,32 @@ async function buildRawData(from, to) {
     const bookings = await fetchBookings(from, to);
     confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, slaProjectIdToName);
     console.log(`[Transform] Confirmed/tentative/SLA breakdown built from ${bookings.length} bookings`);
+
+    // ── Diagnostic: how are Holiday/Leave bookings categorized? ─────────────
+    // NOT yet excluded from utilised hours — this only reports what's found,
+    // so we can implement the right fix from real data instead of guessing
+    // (this is exactly the mistake made with SLA-rota matching earlier).
+    // A booking during someone's holiday currently still counts as
+    // "confirmed work" if it isn't a recognized rota — if holiday is booked
+    // as a regular Booking (not RG's separate Leave/Absence feature), it
+    // would incorrectly inflate utilisation the same way SLA-rota did.
+    const holidayCandidates = bookings.filter(b => {
+      const text = `${b.details || ''} ${b.notes || ''}`.toLowerCase();
+      return /holiday|annual leave|\bleave\b|\bpto\b|day off|sick(?:\s|$)/i.test(text);
+    });
+    const uniqueHolidayCombos = new Map(); // "projectId|clientId" -> sample
+    holidayCandidates.forEach(b => {
+      const key = `${b.project_id}|${b.client_id}`;
+      if (!uniqueHolidayCombos.has(key)) uniqueHolidayCombos.set(key, b);
+    });
+    if (holidayCandidates.length) {
+      console.log(`[Transform] HOLIDAY DIAGNOSTIC: found ${holidayCandidates.length} booking(s) mentioning holiday/leave/PTO/sick in details or notes, across ${uniqueHolidayCombos.size} distinct project/client combo(s):`);
+      [...uniqueHolidayCombos.values()].slice(0, 10).forEach(b => {
+        console.log(`[Transform]   project_id=${b.project_id} client_id=${b.client_id} tentative=${b.tentative} details=${JSON.stringify(b.details)} notes=${JSON.stringify(b.notes)}`);
+      });
+    } else {
+      console.warn('[Transform] HOLIDAY DIAGNOSTIC: no booking in this date range mentions holiday/leave/PTO/sick in details/notes. If holidays ARE booked in this account, they may use RG\'s separate Leave/Absence feature instead (in which case they may already correctly reduce availability without needing a fix here), or a project/client name that doesn\'t match this text search — check a real holiday booking\'s Project/Client field directly in RG and let us know.');
+    }
   } catch (err) {
     console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative and SLA hours will read as 0):', err.message);
   }
@@ -246,8 +275,17 @@ async function buildRawData(from, to) {
         ? r.resource_type?.name
         : r.resource_type || resourceMeta[name]?.rtName || 'Person';
 
-      // Skip non-person resources (vehicles, rooms, placeholders)
-      if (isNonPerson(rtName)) continue;
+      // Rooms/vehicles/misc are still fully excluded — never real capacity.
+      if (isEquipmentOrRoom(rtName)) continue;
+
+      // Placeholder resources (e.g. "PLC Commissioning Placeholder") represent
+      // a department's UNASSIGNED work — bookings made before a specific
+      // engineer is assigned. Previously these were silently dropped
+      // entirely via the same filter as rooms/vehicles. Now tracked
+      // separately, per department per week, as "unassigned_hours" on the
+      // TEAM row (never as an individual engineer — there's no real person
+      // to attribute it to).
+      const isPlaceholderResource = isPlaceholder(rtName);
 
       // ── Department: from custom_fields["81460"] array of option IDs ────
       // People with NO department set get "Unassigned"
@@ -300,6 +338,34 @@ async function buildRawData(from, to) {
       const util      = +(totalUtil      / share).toFixed(2);
       const tentative = +(totalTentative / share).toFixed(2);
 
+      function ensureTeamRow(team) {
+        const teamKey = `${team}|${wk.label}`;
+        if (!teamsMap[teamKey]) {
+          teamsMap[teamKey] = {
+            week: wk.label, team,
+            available_hours: 0, utilized_hours: 0, tentative_hours: 0,
+            sla_rota_hours: {}, sla_rota_tentative_hours: {},
+            unassigned_hours: 0, unassigned_tentative_hours: 0,
+            _hc: new Set(),
+          };
+        }
+        return teamsMap[teamKey];
+      }
+
+      // Placeholder resources represent a department's UNASSIGNED work —
+      // attribute their hours directly to the team row only (never to an
+      // individual engineer — there's no real person to attribute it to,
+      // and they must never appear in engineerList/engineersMap).
+      if (isPlaceholderResource) {
+        for (const team of departments) {
+          const row = ensureTeamRow(team);
+          row.unassigned_hours           = +((row.unassigned_hours || 0) + util).toFixed(2);
+          row.unassigned_tentative_hours = +((row.unassigned_tentative_hours || 0) + tentative).toFixed(2);
+          // Deliberately NOT added to _hc (headcount) — not a real person.
+        }
+        continue;
+      }
+
       // Use primary (first) department for engineer list and weekly rows
       const primaryTeam = departments[0];
 
@@ -340,25 +406,17 @@ async function buildRawData(from, to) {
 
       // Team aggregates — contribute to ALL departments the person belongs to
       for (const team of departments) {
-        const teamKey = `${team}|${wk.label}`;
-        if (!teamsMap[teamKey]) {
-          teamsMap[teamKey] = {
-            week: wk.label, team,
-            available_hours: 0, utilized_hours: 0, tentative_hours: 0,
-            sla_rota_hours: {}, sla_rota_tentative_hours: {},
-            _hc: new Set(),
-          };
-        }
-        teamsMap[teamKey].available_hours += avail;
-        teamsMap[teamKey].utilized_hours  += util;
-        teamsMap[teamKey].tentative_hours += tentative;
+        const row = ensureTeamRow(team);
+        row.available_hours += avail;
+        row.utilized_hours  += util;
+        row.tentative_hours += tentative;
         for (const [projName, hrs] of Object.entries(slaByProjectHours)) {
-          teamsMap[teamKey].sla_rota_hours[projName] = +((teamsMap[teamKey].sla_rota_hours[projName] || 0) + hrs).toFixed(2);
+          row.sla_rota_hours[projName] = +((row.sla_rota_hours[projName] || 0) + hrs).toFixed(2);
         }
         for (const [projName, hrs] of Object.entries(slaByProjectTentativeHours)) {
-          teamsMap[teamKey].sla_rota_tentative_hours[projName] = +((teamsMap[teamKey].sla_rota_tentative_hours[projName] || 0) + hrs).toFixed(2);
+          row.sla_rota_tentative_hours[projName] = +((row.sla_rota_tentative_hours[projName] || 0) + hrs).toFixed(2);
         }
-        if (avail > 0 || util > 0) teamsMap[teamKey]._hc.add(name);
+        if (avail > 0 || util > 0) row._hc.add(name);
       }
     }
 
@@ -368,9 +426,11 @@ async function buildRawData(from, to) {
 
   const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({
     ...rest,
-    available_hours:     +rest.available_hours.toFixed(2),
-    utilized_hours:      +rest.utilized_hours.toFixed(2),
-    tentative_hours:     +rest.tentative_hours.toFixed(2),
+    available_hours:            +rest.available_hours.toFixed(2),
+    utilized_hours:             +rest.utilized_hours.toFixed(2),
+    tentative_hours:            +rest.tentative_hours.toFixed(2),
+    unassigned_hours:           +(rest.unassigned_hours || 0).toFixed(2),
+    unassigned_tentative_hours: +(rest.unassigned_tentative_hours || 0).toFixed(2),
     // sla_rota_hours / sla_rota_tentative_hours are already per-project
     // objects with rounded values from the loop above — nothing further to
     // round here.
