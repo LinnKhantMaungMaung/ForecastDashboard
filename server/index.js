@@ -39,7 +39,15 @@ app.use(express.static(path.join(__dirname, '../public')));
 // Users requesting the identical range legitimately share the cached result
 // (it's the same data either way — this is not "their" personal state).
 // No sessions, no cookies, no authentication involved.
-const RANGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours, per spec
+// IMPORTANT: this was originally 24 hours, but that meant any change made
+// directly in Resource Guru (a new booking, a new holiday, etc.) was
+// invisible on the dashboard for up to a full day — nothing in the normal
+// flow (page refresh, or the periodic background poll in index.html) ever
+// passes refresh=1, so a long TTL just kept serving stale cached data
+// indefinitely until it happened to expire. 15 minutes balances staying
+// reasonably close to live against not hammering the Resource Guru API on
+// every single page load/poll.
+const RANGE_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const rangeCaches = new Map(); // key "from_to" → { data, fetchedAt, expiresAt, building, buildPromise }
 
 const DEFAULT_RANGE = (() => {
