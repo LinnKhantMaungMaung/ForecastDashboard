@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchClients, fetchBookings, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchClients, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -66,61 +66,29 @@ function isNonPerson(rtName) {
   return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
 }
 
-// ── Excluded bookings ────────────────────────────────────────────────────────
-// These specific standing/rota bookings never count toward utilised or
-// tentative hours (e.g. on-call rotas that would otherwise inflate real
-// project utilisation). Turned out they aren't tied to a Project at all —
-// checked the account's full Project list and nothing matched — so instead
-// of project name, this matches on:
-//   (a) the booking's own "details"/"notes" text, AND/OR
-//   (b) the Client the booking is assigned to,
-// combined with OR, so it catches the booking regardless of which field
-// actually carries the identifying info. Add more entries to either list if
-// other rota-style bookings need the same treatment.
-const EXCLUDED_BOOKING_DETAILS = [
-  'SLA-ROTA NIGHTS ON CALL',
-  'SLA ROTA- CONTROLS',
-];
-const EXCLUDED_CLIENT_NAMES = [
-  'SLA-Controls',
-];
-// Most reliable exclusion: exact numeric Project/Client ids. Fill these in
-// directly from the "[Transform] Found N booking(s) with an exact 12h/day
-// (720min) entry..." log line — it prints the real project_id/client_id for
-// this rota straight from booking data, bypassing name-matching entirely
-// (which failed here because "SLA-ROTA NIGHTS ON CALL" turned out to be an
-// archived/inactive Project — it still shows correctly in the RG UI and on
-// existing bookings, but doesn't come back from the basic /projects list
-// fetch, which appears to only return active projects by default).
-const EXCLUDED_PROJECT_IDS = new Set([
-  // e.g. 2960367,
-]);
-const EXCLUDED_CLIENT_IDS = new Set([
-  // e.g. 280904,
-]);
-// Strips a trailing "(...)" suffix (in case a client name got copied in
-// alongside the details text from the UI display) before comparing.
-function normalizeText(name) {
-  return (name || '')
-    .replace(/\s*\([^)]*\)\s*$/, '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+// ── SLA-rota bookings ────────────────────────────────────────────────────────
+// Standing on-call/rota bookings (e.g. "SLA-ROTA NIGHTS ON CALL", "SLA ROTA-
+// CONTROLS", "SLA ROTA - HELIX", etc.) are tracked SEPARATELY from normal
+// project hours rather than being unconditionally dropped — this lets the
+// dashboard offer a live "Include SLA-Rota Bookings" toggle instead of
+// requiring a redeploy to change whether they count.
+//
+// Matched broadly: ANY project name or client name containing "sla"
+// (case-insensitive substring) is treated as SLA-related — this
+// automatically covers "SLA-Helix" alongside "SLA-Controls" and any other
+// SLA-prefixed project/client added in Resource Guru later, without needing
+// to enumerate every exact name. A booking's own details/notes text is
+// checked the same way as a fallback, since some bookings may carry neither
+// a project_id nor a client_id (seen in real data).
+function isSlaRelated(name) {
+  return /\bsla\b/i.test(name || '') || /sla[\s-]/i.test(name || '');
 }
-const EXCLUDED_BOOKING_DETAILS_NORMALIZED = new Set(EXCLUDED_BOOKING_DETAILS.map(normalizeText));
-const EXCLUDED_CLIENT_NAMES_NORMALIZED    = new Set(EXCLUDED_CLIENT_NAMES.map(normalizeText));
 
-// A booking's own details/notes text matches one of the excluded strings —
-// either the WHOLE field (after normalizing) or, since some bookings may
-// have extra text appended, if it contains the excluded string as a
-// substring. "notes" is RG's deprecated alias for "details" — check both.
-function bookingDetailsMatch(b) {
-  const text = normalizeText(b.details || b.notes || '');
-  if (!text) return false;
-  for (const excluded of EXCLUDED_BOOKING_DETAILS_NORMALIZED) {
-    if (text === excluded || text.includes(excluded)) return true;
-  }
-  return false;
+// A booking's own details/notes text mentions SLA — fallback for bookings
+// with neither a recognized project nor client id.
+function bookingDetailsIsSla(b) {
+  const text = `${b.details || ''} ${b.notes || ''}`;
+  return isSlaRelated(text);
 }
 
 // ── Confirmed vs Tentative breakdown from real Bookings ──────────────────────
@@ -134,34 +102,40 @@ function bookingDetailsMatch(b) {
 // To get a real split, we pull actual Bookings (which expose a per-booking
 // "tentative" flag) once for the whole date range, then bucket each day's
 // duration into the correct week, split by that flag. Waiting-list days
-// (duration.waiting === true) are excluded from both buckets here — they're
-// a separate concept from "tentative" and aren't what this toggle means.
-// Bookings matching EXCLUDED_BOOKING_DETAILS (by text) or EXCLUDED_CLIENT_NAMES
-// (by client_id) are dropped entirely — they never contribute to confirmed
-// or tentative hours either.
+// (duration.waiting === true) are excluded entirely — they're a separate
+// concept from "tentative" and aren't what that toggle means.
 //
-// Returns: { "resourceId|weekLabel": { confirmedMins, tentativeMins } }
-function buildConfirmedTentativeBreakdown(bookings, excludedClientIds) {
+// SLA-rota bookings (see isSlaRelated() above) are bucketed SEPARATELY
+// (slaConfirmedMins/slaTentativeMins) rather than dropped, so the dashboard
+// can offer a live include/exclude toggle.
+//
+// Returns: { "resourceId|weekLabel": { confirmedMins, tentativeMins, slaConfirmedMins, slaTentativeMins } }
+function buildConfirmedTentativeBreakdown(bookings, slaProjectIds, slaClientIds) {
   const breakdown = {};
-  let excludedCount = 0;
+  let slaCount = 0;
   for (const b of bookings) {
     const resId = b.resource_id;
     if (resId == null) continue;
-    const excludedByProjectId = b.project_id != null && EXCLUDED_PROJECT_IDS.has(b.project_id);
-    const excludedByClientId  = b.client_id  != null && (EXCLUDED_CLIENT_IDS.has(b.client_id) || excludedClientIds.has(b.client_id));
-    const excludedByDetails   = bookingDetailsMatch(b);
-    if (excludedByProjectId || excludedByClientId || excludedByDetails) { excludedCount++; continue; }
+    const isSla = (b.project_id != null && slaProjectIds.has(b.project_id))
+               || (b.client_id  != null && slaClientIds.has(b.client_id))
+               || bookingDetailsIsSla(b);
+    if (isSla) slaCount++;
     const isTentative = b.tentative === true;
     for (const d of (b.durations || [])) {
       if (d.waiting) continue; // waiting list ≠ tentative — excluded from this split
       const wk = toWeekLabel(new Date(d.date));
       const key = `${resId}|${wk}`;
-      if (!breakdown[key]) breakdown[key] = { confirmedMins: 0, tentativeMins: 0 };
-      if (isTentative) breakdown[key].tentativeMins += (d.duration || 0);
-      else              breakdown[key].confirmedMins += (d.duration || 0);
+      if (!breakdown[key]) breakdown[key] = { confirmedMins: 0, tentativeMins: 0, slaConfirmedMins: 0, slaTentativeMins: 0 };
+      if (isSla) {
+        if (isTentative) breakdown[key].slaTentativeMins += (d.duration || 0);
+        else              breakdown[key].slaConfirmedMins += (d.duration || 0);
+      } else {
+        if (isTentative) breakdown[key].tentativeMins += (d.duration || 0);
+        else              breakdown[key].confirmedMins += (d.duration || 0);
+      }
     }
   }
-  if (excludedCount > 0) console.log(`[Transform] Excluded ${excludedCount} bookings matching excluded details (${EXCLUDED_BOOKING_DETAILS.join(', ')}) or client (${EXCLUDED_CLIENT_NAMES.join(', ')})`);
+  if (slaCount > 0) console.log(`[Transform] Tracked ${slaCount} SLA-rota booking(s) separately (excluded from utilised hours by default — togglable)`);
   return breakdown;
 }
 
@@ -174,12 +148,14 @@ async function buildRawData(from, to) {
   const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
   let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
   const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
-  const excludedClientIds  = new Set(); // RG client ids matching EXCLUDED_CLIENT_NAMES
+  const slaProjectIds      = new Set(); // RG project ids containing "SLA"
+  const slaClientIds       = new Set(); // RG client ids containing "SLA"
 
   try {
-    const [resources, resourceTypes, clients] = await Promise.all([
+    const [resources, resourceTypes, projects, clients] = await Promise.all([
       fetchResources(),
       fetchResourceTypes(),
+      fetchProjects(),
       fetchClients(),
     ]);
 
@@ -196,23 +172,20 @@ async function buildRawData(from, to) {
       }
     }
 
+    if (Array.isArray(projects)) {
+      const matched = projects.filter(p => isSlaRelated(p.name));
+      matched.forEach(p => slaProjectIds.add(p.id));
+      console.log(`[Transform] SLA-related projects found (${matched.length} of ${projects.length} total): ${matched.map(p => `"${p.name}"`).join(', ') || '(none)'}`);
+    } else {
+      console.warn('[Transform] Projects fetch returned no array — SLA-project matching will rely on client/details matching only');
+    }
+
     if (Array.isArray(clients)) {
-      clients.forEach(c => {
-        if (EXCLUDED_CLIENT_NAMES_NORMALIZED.has(normalizeText(c.name))) {
-          excludedClientIds.add(c.id);
-        }
-      });
-      if (excludedClientIds.size > 0) {
-        console.log(`[Transform] Resolved ${excludedClientIds.size} excluded client id(s) from name match`);
-      } else {
-        console.warn(`[Transform] No clients matched EXCLUDED_CLIENT_NAMES (${EXCLUDED_CLIENT_NAMES.join(', ')}) — relying on booking-details text match only for these exclusions`);
-        const candidates = clients
-          .filter(c => /sla/i.test(c.name || ''))
-          .map(c => `"${c.name}" (id ${c.id})`);
-        if (candidates.length) {
-          console.warn(`[Transform] Closest real client name(s) found: ${candidates.join(', ')} — compare exact spelling/punctuation against EXCLUDED_CLIENT_NAMES above`);
-        }
-      }
+      const matched = clients.filter(c => isSlaRelated(c.name));
+      matched.forEach(c => slaClientIds.add(c.id));
+      console.log(`[Transform] SLA-related clients found (${matched.length} of ${clients.length} total): ${matched.map(c => `"${c.name}"`).join(', ') || '(none)'}`);
+    } else {
+      console.warn('[Transform] Clients fetch returned no array — SLA-client matching will rely on project/details matching only');
     }
 
     if (Array.isArray(resources)) {
@@ -236,59 +209,15 @@ async function buildRawData(from, to) {
 
   // Fetch every Booking in the whole range ONCE (not per-week — much lighter
   // on the API than the existing weekly report loop), then bucket
-  // confirmed/tentative minutes per resource per week ourselves from each
-  // booking's durations, excluding any booking that matches by details text
-  // or client (see EXCLUDED_BOOKING_DETAILS / EXCLUDED_CLIENT_NAMES above).
+  // confirmed/tentative/SLA minutes per resource per week ourselves from
+  // each booking's durations.
   let confirmedTentativeBreakdown = {};
   try {
     const bookings = await fetchBookings(from, to);
-
-    // Diagnostic: dump the RAW shape of any booking that even loosely
-    // mentions "sla" or "rota" anywhere in its text fields, regardless of
-    // whether our current match logic catches it.
-    const looksRelevant = (b) => {
-      const haystack = `${b.details || ''} ${b.notes || ''}`.toLowerCase();
-      return /sla|rota/.test(haystack);
-    };
-    const relevantSample = bookings.filter(looksRelevant).slice(0, 5);
-    if (relevantSample.length) {
-      console.log(`[Transform] Found ${bookings.filter(looksRelevant).length} booking(s) mentioning "sla"/"rota" in details/notes — sample:`);
-      relevantSample.forEach(b => {
-        console.log(`[Transform]   resource_id=${b.resource_id} client_id=${b.client_id} project_id=${b.project_id} tentative=${b.tentative} details=${JSON.stringify(b.details)} notes=${JSON.stringify(b.notes)}`);
-      });
-    } else {
-      console.warn(`[Transform] NONE of the ${bookings.length} bookings fetched for ${from}→${to} mention "sla" or "rota" anywhere in details/notes.`);
-    }
-
-    // Diagnostic 2: the booking itself has NO project-name field at all —
-    // only a numeric project_id — and confirmed via the RG UI that
-    // "SLA-ROTA NIGHTS ON CALL" is a real Project, yet it never showed up
-    // in our /projects list fetch. That points at it being archived/
-    // inactive, which basic list endpoints often exclude by default even
-    // though existing bookings still reference it by id. So: identify it
-    // directly by its distinctive pattern instead — 12h/day (720 min),
-    // recurring — and print the exact project_id/client_id straight from
-    // the booking data. Those numeric ids are then usable as a rock-solid
-    // exclusion key regardless of whether the project/client is archived.
-    const twelveHourCandidates = bookings.filter(b => (b.durations || []).some(d => d.duration === 720));
-    const uniqueTwelveHour = new Map(); // "projectId|clientId" -> sample booking
-    twelveHourCandidates.forEach(b => {
-      const key = `${b.project_id}|${b.client_id}`;
-      if (!uniqueTwelveHour.has(key)) uniqueTwelveHour.set(key, b);
-    });
-    if (uniqueTwelveHour.size) {
-      console.log(`[Transform] Found ${twelveHourCandidates.length} booking(s) with an exact 12h/day (720min) entry, across ${uniqueTwelveHour.size} distinct project/client id combo(s):`);
-      [...uniqueTwelveHour.values()].slice(0, 10).forEach(b => {
-        console.log(`[Transform]   project_id=${b.project_id} client_id=${b.client_id} tentative=${b.tentative} first_date=${b.durations[0]?.date} details=${JSON.stringify(b.details)}`);
-      });
-    } else {
-      console.warn(`[Transform] No booking with an exact 720-minute (12h) day found in this date range — "SLA-ROTA NIGHTS ON CALL" may not fall within ${from}→${to}, or its per-day duration isn't exactly 720.`);
-    }
-
-    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedClientIds);
-    console.log(`[Transform] Confirmed/tentative breakdown built from ${bookings.length} bookings`);
+    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, slaProjectIds, slaClientIds);
+    console.log(`[Transform] Confirmed/tentative/SLA breakdown built from ${bookings.length} bookings`);
   } catch (err) {
-    console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative will read as 0, excluded projects will NOT be filtered):', err.message);
+    console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative and SLA hours will read as 0):', err.message);
   }
 
   const teamsMap     = {};
@@ -350,15 +279,22 @@ async function buildRawData(from, to) {
       // back to treating everything as confirmed (old behaviour) if the
       // bookings fetch failed for some reason, so the dashboard still shows
       // sensible totals rather than zeros.
+      // SLA-rota hours are kept SEPARATE (not folded into utilized/tentative
+      // by default) so the dashboard can offer a live include/exclude toggle
+      // instead of a hardcoded exclusion baked in at the server.
       const bd = confirmedTentativeBreakdown[`${r.id}|${wk.label}`];
-      const totalUtil      = bd ? +(bd.confirmedMins / 60).toFixed(2) : +((r.booked || 0) / 60).toFixed(2);
-      const totalTentative = bd ? +(bd.tentativeMins / 60).toFixed(2) : 0;
+      const totalUtil        = bd ? +(bd.confirmedMins / 60).toFixed(2)     : +((r.booked || 0) / 60).toFixed(2);
+      const totalTentative   = bd ? +(bd.tentativeMins / 60).toFixed(2)     : 0;
+      const totalSlaUtil     = bd ? +(bd.slaConfirmedMins / 60).toFixed(2)  : 0;
+      const totalSlaTentative= bd ? +(bd.slaTentativeMins / 60).toFixed(2)  : 0;
 
       // Split hours equally across departments if person has multiple
       const share = departments.length;
-      const avail     = +(totalAvail     / share).toFixed(2);
-      const util      = +(totalUtil      / share).toFixed(2);
-      const tentative = +(totalTentative / share).toFixed(2);
+      const avail        = +(totalAvail         / share).toFixed(2);
+      const util         = +(totalUtil          / share).toFixed(2);
+      const tentative    = +(totalTentative     / share).toFixed(2);
+      const slaUtil      = +(totalSlaUtil       / share).toFixed(2);
+      const slaTentative = +(totalSlaTentative  / share).toFixed(2);
 
       // Use primary (first) department for engineer list and weekly rows
       const primaryTeam = departments[0];
@@ -386,12 +322,14 @@ async function buildRawData(from, to) {
       // Engineer weekly row (primary team only for chart simplicity)
       engineersMap[`${name}|${wk.label}`] = {
         week: wk.label, name,
-        team:            primaryTeam,
+        team:              primaryTeam,
         departments,
-        job_title:       resolvedJobTitle,
-        available_hours: totalAvail,
-        utilized_hours:  totalUtil,
-        tentative_hours: totalTentative,
+        job_title:         resolvedJobTitle,
+        available_hours:   totalAvail,
+        utilized_hours:    totalUtil,
+        tentative_hours:   totalTentative,
+        sla_hours:         totalSlaUtil,
+        sla_tentative_hours: totalSlaTentative,
         isContractor,
         seniority,
       };
@@ -403,12 +341,15 @@ async function buildRawData(from, to) {
           teamsMap[teamKey] = {
             week: wk.label, team,
             available_hours: 0, utilized_hours: 0, tentative_hours: 0,
+            sla_hours: 0, sla_tentative_hours: 0,
             _hc: new Set(),
           };
         }
-        teamsMap[teamKey].available_hours += avail;
-        teamsMap[teamKey].utilized_hours  += util;
-        teamsMap[teamKey].tentative_hours += tentative;
+        teamsMap[teamKey].available_hours    += avail;
+        teamsMap[teamKey].utilized_hours     += util;
+        teamsMap[teamKey].tentative_hours    += tentative;
+        teamsMap[teamKey].sla_hours          += slaUtil;
+        teamsMap[teamKey].sla_tentative_hours += slaTentative;
         if (avail > 0 || util > 0) teamsMap[teamKey]._hc.add(name);
       }
     }
@@ -419,9 +360,11 @@ async function buildRawData(from, to) {
 
   const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({
     ...rest,
-    available_hours: +rest.available_hours.toFixed(2),
-    utilized_hours:  +rest.utilized_hours.toFixed(2),
-    tentative_hours: +rest.tentative_hours.toFixed(2),
+    available_hours:     +rest.available_hours.toFixed(2),
+    utilized_hours:      +rest.utilized_hours.toFixed(2),
+    tentative_hours:     +rest.tentative_hours.toFixed(2),
+    sla_hours:           +rest.sla_hours.toFixed(2),
+    sla_tentative_hours: +rest.sla_tentative_hours.toFixed(2),
     headcount: _hc.size,
   }));
 
