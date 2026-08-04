@@ -165,6 +165,35 @@ async function fetchClients(forceRefresh = false) {
   return data;
 }
 
+// Time Off / Downtime events (holidays, sick leave, etc.) — a SEPARATE
+// resource from Bookings entirely, confirmed via RG's UI ("Time Off" popup,
+// distinct black-bar styling from colored project Bookings). Each event has
+// resource_ids (array — one event can cover several people), from/to dates,
+// start_time/end_time (minutes from midnight), and a state
+// ("Approved"/"Pending"/etc — only Approved should count as real absence).
+async function fetchDowntimes(from, to) {
+  console.log(`[RG] Fetching downtimes (Time Off): ${from} → ${to}...`);
+  const results = [];
+  const limit = 100;
+  let offset = 0;
+  while (true) {
+    const data = await rgGet('/downtimes', { from, to, limit, offset });
+    if (!Array.isArray(data) || data.length === 0) break;
+    results.push(...data);
+    offset += data.length;
+    await sleep(150);
+  }
+  console.log(`[RG] Fetched ${results.length} downtime (Time Off) events total`);
+  return results;
+}
+
+// Downtime/Time Off event TYPES (e.g. "Holiday (personal)", "Compassionate
+// leave") — maps downtime_type_id to a readable name.
+async function fetchDowntimeTypes() {
+  console.log('[RG] Fetching downtime types...');
+  return rgGet('/downtime_types');
+}
+
 // v2 utilisation report for a single week range
 // Returns array of resources with booked/availability totals for that period.
 // IMPORTANT: "booked" here includes BOTH confirmed AND tentative bookings —
@@ -248,6 +277,8 @@ module.exports = {
   fetchResourceTypes,
   fetchProjects,
   fetchClients,
+  fetchDowntimes,
+  fetchDowntimeTypes,
   fetchReport,
   fetchReportRange,
   fetchBookings,
