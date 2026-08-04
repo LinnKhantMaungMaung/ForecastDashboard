@@ -65,8 +65,15 @@ function getSeniority(job_title) {
 function isEquipmentOrRoom(rtName) {
   return /vehicle|conference|meeting room|miscellaneous/i.test(rtName || '');
 }
-function isPlaceholder(rtName) {
-  return /placeholder/i.test(rtName || '');
+function isPlaceholder(rtName, jobTitle) {
+  // "Placeholder" turned out to be a JOB TITLE in this account, not a
+  // resource_type at all (confirmed: this account only has "Person" and
+  // "Vehicle" resource types) — e.g. "Sub Con Panel Build" has job_title
+  // "Placeholder", the same field that holds "Service Engineer" or
+  // "Integration Director" for real people. Check job_title primarily,
+  // but also check resource_type in case another account genuinely does
+  // use a dedicated Placeholder resource type.
+  return /placeholder/i.test(jobTitle || '') || /placeholder/i.test(rtName || '');
 }
 
 // ── SLA-rota bookings ────────────────────────────────────────────────────────
@@ -230,23 +237,21 @@ async function buildRawData(from, to) {
       console.log(`[Transform] Resource metadata: ${Object.keys(resourceMeta).length} resources`);
 
       // DIAGNOSTIC: how many resources are detected as Placeholder (tracked
-      // as unassigned team-level work) vs everything else, and the full set
-      // of distinct resource_type names seen — so a naming mismatch (e.g.
-      // this account calls it something other than "Placeholder") is
-      // visible immediately instead of silently showing nothing.
+      // as unassigned team-level work) — confirmed via real data that
+      // "Placeholder" is a job_title in this account, not a resource_type.
       const allTypeNames = [...new Set(resources.map(r => {
         const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
         return rt || 'Person';
       }))].sort();
       const placeholderResources = resources.filter(r => {
         const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
-        return isPlaceholder(rt);
+        return isPlaceholder(rt, r.job_title);
       });
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
-        console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder: ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
+        console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder (by job_title): ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
       } else {
-        console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 resources matched isPlaceholder() out of ${resources.length} total. If you have Placeholder-type resources in Resource Guru, check the resource_type names listed above — the match is currently /placeholder/i, so a different naming (e.g. "Generic", "TBD", "Unassigned") would need the regex updated.`);
+        console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 resources matched isPlaceholder() out of ${resources.length} total (checked both resource_type and job_title for "placeholder").`);
       }
     }
   } catch (err) {
@@ -303,7 +308,7 @@ async function buildRawData(from, to) {
       // separately, per department per week, as "unassigned_hours" on the
       // TEAM row (never as an individual engineer — there's no real person
       // to attribute it to).
-      const isPlaceholderResource = isPlaceholder(rtName);
+      const isPlaceholderResource = isPlaceholder(rtName, job_title || resourceMeta[name]?.job_title || '');
 
       // ── Department: from custom_fields["81460"] array of option IDs ────
       // People with NO department set get "Unassigned"
