@@ -1,5 +1,5 @@
 // server/transformer.js
-const { fetchReportRange, fetchResources, fetchResourceTypes, fetchBookings, sleep } = require('./resourceGuru');
+const { fetchReportRange, fetchResources, fetchResourceTypes, fetchProjects, fetchBookings, sleep } = require('./resourceGuru');
 
 function toWeekLabel(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -66,6 +66,20 @@ function isNonPerson(rtName) {
   return /vehicle|conference|meeting room|miscellaneous|placeholder/i.test(rtName || '');
 }
 
+// ── Excluded projects ──────────────────────────────────────────────────────
+// Bookings under these projects (matched by exact name, case-insensitive)
+// never count toward utilised/tentative hours — e.g. standing on-call/rota
+// bookings that would otherwise inflate real project utilisation. Add more
+// names here if other rota-style projects need the same treatment.
+const EXCLUDED_PROJECT_NAMES = [
+  'SLA-ROTA NIGHTS ON CALL',
+  'SLA ROTA- CONTROLS',
+];
+function normalizeProjectName(name) {
+  return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+const EXCLUDED_PROJECT_NAMES_NORMALIZED = new Set(EXCLUDED_PROJECT_NAMES.map(normalizeProjectName));
+
 // ── Confirmed vs Tentative breakdown from real Bookings ──────────────────────
 // Resource Guru's Report endpoint only exposes "booked" (confirmed AND
 // tentative combined) and "waiting_list" (a DIFFERENT concept entirely —
@@ -79,13 +93,17 @@ function isNonPerson(rtName) {
 // duration into the correct week, split by that flag. Waiting-list days
 // (duration.waiting === true) are excluded from both buckets here — they're
 // a separate concept from "tentative" and aren't what this toggle means.
+// Bookings under an EXCLUDED_PROJECT_NAMES project are dropped entirely —
+// they never contribute to confirmed or tentative hours either.
 //
 // Returns: { "resourceId|weekLabel": { confirmedMins, tentativeMins } }
-function buildConfirmedTentativeBreakdown(bookings) {
+function buildConfirmedTentativeBreakdown(bookings, excludedProjectIds) {
   const breakdown = {};
+  let excludedCount = 0;
   for (const b of bookings) {
     const resId = b.resource_id;
     if (resId == null) continue;
+    if (b.project_id != null && excludedProjectIds.has(b.project_id)) { excludedCount++; continue; }
     const isTentative = b.tentative === true;
     for (const d of (b.durations || [])) {
       if (d.waiting) continue; // waiting list ≠ tentative — excluded from this split
@@ -96,6 +114,7 @@ function buildConfirmedTentativeBreakdown(bookings) {
       else              breakdown[key].confirmedMins += (d.duration || 0);
     }
   }
+  if (excludedCount > 0) console.log(`[Transform] Excluded ${excludedCount} bookings under excluded projects (${EXCLUDED_PROJECT_NAMES.join(', ')})`);
   return breakdown;
 }
 
@@ -108,11 +127,13 @@ async function buildRawData(from, to) {
   const CONTRACTOR_OPT_ID  = 172385; // custom_field 81461: 172385=Contractor
   let   resourceMeta       = {}; // name → { isEquipment, seniority, job_title }
   const resourceIdToName   = {}; // RG resource id → name (for the bookings breakdown below)
+  const excludedProjectIds = new Set(); // RG project ids matching EXCLUDED_PROJECT_NAMES
 
   try {
-    const [resources, resourceTypes] = await Promise.all([
+    const [resources, resourceTypes, projects] = await Promise.all([
       fetchResources(),
       fetchResourceTypes(),
+      fetchProjects(),
     ]);
 
     if (Array.isArray(resourceTypes)) {
@@ -125,6 +146,19 @@ async function buildRawData(from, to) {
           deptOptionLookup[String(opt.id)] = opt.value; // also index by string
         });
         console.log(`[Transform] Departments loaded: ${Object.values(deptOptionLookup).filter((v,i,a)=>a.indexOf(v)===i).join(', ')}`);
+      }
+    }
+
+    if (Array.isArray(projects)) {
+      projects.forEach(p => {
+        if (EXCLUDED_PROJECT_NAMES_NORMALIZED.has(normalizeProjectName(p.name))) {
+          excludedProjectIds.add(p.id);
+        }
+      });
+      if (excludedProjectIds.size > 0) {
+        console.log(`[Transform] Resolved ${excludedProjectIds.size} excluded project id(s) from name match`);
+      } else {
+        console.warn(`[Transform] No projects matched EXCLUDED_PROJECT_NAMES (${EXCLUDED_PROJECT_NAMES.join(', ')}) — check spelling/case against your RG project list`);
       }
     }
 
@@ -148,15 +182,16 @@ async function buildRawData(from, to) {
   }
 
   // Fetch every Booking in the whole range ONCE (not per-week — much lighter
-  // on the API than a call per week), then bucket confirmed/tentative
-  // minutes per resource per week ourselves from each booking's durations.
+  // on the API than the existing weekly report loop), then bucket
+  // confirmed/tentative minutes per resource per week ourselves from each
+  // booking's durations, excluding any booking under an excluded project.
   let confirmedTentativeBreakdown = {};
   try {
     const bookings = await fetchBookings(from, to);
-    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings);
+    confirmedTentativeBreakdown = buildConfirmedTentativeBreakdown(bookings, excludedProjectIds);
     console.log(`[Transform] Confirmed/tentative breakdown built from ${bookings.length} bookings`);
   } catch (err) {
-    console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative will read as 0):', err.message);
+    console.warn('[Transform] Bookings fetch failed — confirmed/tentative split will fall back to Report data (tentative will read as 0, excluded projects will NOT be filtered):', err.message);
   }
 
   const teamsMap     = {};
