@@ -65,15 +65,22 @@ function getSeniority(job_title) {
 function isEquipmentOrRoom(rtName) {
   return /vehicle|conference|meeting room|miscellaneous/i.test(rtName || '');
 }
-function isPlaceholder(rtName, jobTitle) {
-  // "Placeholder" turned out to be a JOB TITLE in this account, not a
-  // resource_type at all (confirmed: this account only has "Person" and
-  // "Vehicle" resource types) — e.g. "Sub Con Panel Build" has job_title
-  // "Placeholder", the same field that holds "Service Engineer" or
-  // "Integration Director" for real people. Check job_title primarily,
-  // but also check resource_type in case another account genuinely does
-  // use a dedicated Placeholder resource type.
-  return /placeholder/i.test(jobTitle || '') || /placeholder/i.test(rtName || '');
+function isPlaceholder(rtName, jobTitleLike) {
+  // Confirmed via real data: this account's /resources endpoint returns the
+  // job-title-equivalent as a field called "type" (e.g. "Design Engineer",
+  // "Installation Electrician"), NOT "job_title" at all — "Placeholder" is
+  // the value of THAT field for stand-in resources like "Sub Con Panel
+  // Build" / "PLC SUB CONTRACT" / "Project Management Forecast...". Check
+  // both possible field names via getJobTitleLike() below, since the
+  // weekly Report endpoint's exact naming isn't separately confirmed —
+  // safer to check both than assume either one exclusively.
+  return /placeholder/i.test(jobTitleLike || '') || /placeholder/i.test(rtName || '');
+}
+// Resource Guru is inconsistent about which field carries the job-title-like
+// value depending on the endpoint — /resources uses "type", other endpoints
+// may use "job_title". Check both rather than assuming one.
+function getJobTitleLike(r) {
+  return r.job_title || r.type || '';
 }
 
 // ── SLA-rota bookings ────────────────────────────────────────────────────────
@@ -226,10 +233,11 @@ async function buildRawData(from, to) {
         const rtName = typeof r.resource_type === 'object'
           ? r.resource_type?.name
           : r.resource_type || 'Person';
+        const jobTitleLike = getJobTitleLike(r);
         resourceMeta[r.name] = {
           isEquipment: isEquipmentOrRoom(rtName),
-          seniority:   getSeniority(r.job_title),
-          job_title:   r.job_title || '',
+          seniority:   getSeniority(jobTitleLike),
+          job_title:   jobTitleLike,
           rtName,
         };
         if (r.id != null) resourceIdToName[r.id] = r.name;
@@ -237,19 +245,21 @@ async function buildRawData(from, to) {
       console.log(`[Transform] Resource metadata: ${Object.keys(resourceMeta).length} resources`);
 
       // DIAGNOSTIC: how many resources are detected as Placeholder (tracked
-      // as unassigned team-level work) — confirmed via real data that
-      // "Placeholder" is a job_title in this account, not a resource_type.
+      // as unassigned team-level work) — confirmed via real data that this
+      // account's /resources endpoint calls the job-title-equivalent field
+      // "type" (e.g. "Design Engineer"), not "job_title" at all. Fixed via
+      // getJobTitleLike() above, which checks both possible field names.
       const allTypeNames = [...new Set(resources.map(r => {
         const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
         return rt || 'Person';
       }))].sort();
       const placeholderResources = resources.filter(r => {
         const rt = typeof r.resource_type === 'object' ? r.resource_type?.name : r.resource_type;
-        return isPlaceholder(rt, r.job_title);
+        return isPlaceholder(rt, getJobTitleLike(r));
       });
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
-        console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder (by job_title): ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
+        console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder: ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
       } else {
         console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 resources matched isPlaceholder() out of ${resources.length} total (checked both resource_type and job_title for "placeholder").`);
         // Still 0 matches even checking job_title — "Placeholder" must live
@@ -306,7 +316,7 @@ async function buildRawData(from, to) {
 
     for (const r of resources) {
       const name      = r.name;
-      const job_title = r.job_title || '';
+      const job_title = getJobTitleLike(r);
 
       // Determine resource type — report returns it as a string e.g. "Person"
       const rtName = typeof r.resource_type === 'object'
