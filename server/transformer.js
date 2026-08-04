@@ -291,6 +291,16 @@ async function buildRawData(from, to) {
           .filter(Boolean);
         const departments = deptNames.length > 0 ? deptNames : [getTeamFromJobTitle(getJobTitleLike(r))];
         placeholderResourceInfo.set(r.id, { name: r.name, departments });
+
+        // DIAGNOSTIC: dump exactly what's happening for "Sub Con Panel
+        // Build" specifically (known from the screenshot to have real
+        // departments "Control Panels - Notts"/"Control Panels - Telford"
+        // set in RG) — since the field ID resolved correctly but
+        // departments still ended up empty, something in custom_fields
+        // itself or the option lookup must not match. Show every step.
+        if (/sub con panel build/i.test(r.name || '')) {
+          console.log(`[Transform] PLACEHOLDER DEPT DIAGNOSTIC for "${r.name}": resource_type=${JSON.stringify(r.resource_type)} resolved fieldId=${fieldId} raw custom_fields=${JSON.stringify(r.custom_fields)} rawDeptIds=${JSON.stringify(rawDeptIds)} resolved deptNames=${JSON.stringify(deptNames)} final departments=${JSON.stringify(departments)}`);
+        }
       });
       console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: all resource_type names in this account: ${allTypeNames.map(t => `"${t}"`).join(', ')}`);
       if (placeholderResources.length) {
