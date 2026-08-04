@@ -1012,6 +1012,21 @@ function renderUtilisation(){
   else renderEngineerViewOnMain(tf,weeks);
 }
 
+// Unassigned/placeholder work lives directly on RAW.teams rows (server-side
+// aggregated from Placeholder-type resources — never attributed to an
+// individual engineer, so it isn't visible via getFilteredTeams()/RAW.engineers
+// at all). This builds a quick team+week lookup for it, respecting
+// department visibility and the tentative toggle same as everything else.
+function getUnassignedLookup(){
+  const map={};
+  for(const r of RAW.teams){
+    if(HIDDEN_DEPTS.has(r.team)) continue;
+    const hrs=(r.unassigned_hours||0)+(SETTINGS.tentative?(r.unassigned_tentative_hours||0):0);
+    map[r.team+'|'+r.week]=(map[r.team+'|'+r.week]||0)+hrs;
+  }
+  return map;
+}
+
 function aggregateTeamWeekly(teamFilter,weeks){
   const ft=getFilteredTeams();
   const teams=teamFilter==='ALL'?ALL_TEAMS:[teamFilter];
@@ -1052,6 +1067,22 @@ function renderTeamView(tf,weeks){
     label:t, data:weeks.map(w=>{ const d=data[t][w]; return d.avail>0?+(d.util/d.avail*100).toFixed(1):null; }),
     borderColor:pal[i%pal.length],backgroundColor:pal[i%pal.length]+'22',tension:.4,pointRadius:3,borderWidth:2,spanGaps:true
   }));
+  // Dashed overlay: total demand INCLUDING unassigned/placeholder work,
+  // sitting above the solid "assigned work only" line for any team that
+  // actually has some unassigned bookings in the visible range. Same color
+  // as the team's solid line so it reads as "this team's real total demand"
+  // rather than a separate series.
+  const unassignedLookup=getUnassignedLookup();
+  teams.slice(0,15).forEach((t,i)=>{
+    const hasUnassigned=weeks.some(w=>(unassignedLookup[t+'|'+w]||0)>0);
+    if(!hasUnassigned) return;
+    ds.push({
+      label:t+' (incl. unassigned)',
+      data:weeks.map(w=>{ const d=data[t][w]; const un=unassignedLookup[t+'|'+w]||0; return d.avail>0?+((d.util+un)/d.avail*100).toFixed(1):null; }),
+      borderColor:pal[i%pal.length],backgroundColor:'transparent',borderDash:[6,4],
+      tension:.4,pointRadius:2,borderWidth:1.5,spanGaps:true,
+    });
+  });
   drawLineChart('main-chart',weeks,ds,mainChart,c=>mainChart=c);
   tableRows=teams.map(t=>{
     let a=0,u=0;
