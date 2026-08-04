@@ -252,6 +252,21 @@ async function buildRawData(from, to) {
         console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: ${placeholderResources.length} resource(s) detected as Placeholder (by job_title): ${placeholderResources.map(r => `"${r.name}"`).join(', ')}`);
       } else {
         console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: 0 resources matched isPlaceholder() out of ${resources.length} total (checked both resource_type and job_title for "placeholder").`);
+        // Still 0 matches even checking job_title — "Placeholder" must live
+        // in a different field than assumed. Dump the FULL raw object for
+        // the specific known resource from the screenshot ("Sub Con Panel
+        // Build"), or anything with "placeholder"/"sub con" in its name, so
+        // we can see every field directly instead of guessing a third time.
+        const rawCandidates = resources.filter(r =>
+          /placeholder|sub con/i.test(r.name || '') ||
+          JSON.stringify(r).toLowerCase().includes('placeholder')
+        );
+        if (rawCandidates.length) {
+          console.log(`[Transform] PLACEHOLDER DIAGNOSTIC: found ${rawCandidates.length} resource(s) with "placeholder" or "sub con" somewhere in their raw data — full object(s):`);
+          rawCandidates.slice(0, 3).forEach(r => console.log(`[Transform]   ${JSON.stringify(r)}`));
+        } else {
+          console.warn(`[Transform] PLACEHOLDER DIAGNOSTIC: no resource's raw JSON contains "placeholder" at all. Dumping first 3 resources' full raw objects for reference: ${resources.slice(0,3).map(r => JSON.stringify(r)).join(' | ')}`);
+        }
       }
     }
   } catch (err) {
