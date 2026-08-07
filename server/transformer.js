@@ -474,6 +474,8 @@ async function buildRawData(from, to) {
             available_hours: 0, utilized_hours: 0, tentative_hours: 0,
             sla_rota_hours: {}, sla_rota_tentative_hours: {},
             unassigned_hours: 0, unassigned_tentative_hours: 0,
+            unassigned_by_name_hours: {}, unassigned_by_name_tentative_hours: {},
+            plc_subcontract_hours: 0, plc_subcontract_tentative_hours: 0,
             _hc: new Set(),
           };
         }
@@ -562,15 +564,49 @@ async function buildRawData(from, to) {
   // of resource type, which is exactly how SLA-rota tracking already works
   // for any resource. So: for each known Placeholder, pull its hours
   // directly from that breakdown, per week, and attribute to its team row.
+  //
+  // SPECIAL CASE: "PLC SUB CONTRACT" is treated as real PLC team work (goes
+  // into plc_subcontract_hours, contributing to PLC's solid utilisation
+  // line alongside real engineers, toggled the same way as
+  // Employees/Contractors) rather than the generic dashed "unassigned work"
+  // overlay that every other Placeholder uses.
+  const PLC_SUBCONTRACT_NAME = 'PLC SUB CONTRACT';
   let placeholderHoursFound = 0;
+  const hoursPerPlaceholder = {}; // resource name -> total hours found in this range, for diagnostics
+  const unassignedPlaceholderNames = new Set(); // every placeholder name EXCEPT PLC Sub Contract, for the individual checklist
   for (const [resId, info] of placeholderResourceInfo) {
+    const isPlcSubContract = info.name.trim().toUpperCase() === PLC_SUBCONTRACT_NAME;
+    if (!isPlcSubContract) unassignedPlaceholderNames.add(info.name);
     for (const wk of weeks) {
       const bd = confirmedTentativeBreakdown[`${resId}|${wk.label}`];
       if (!bd) continue;
       const confirmedHrs = +(bd.confirmedMins / 60).toFixed(2);
       const tentativeHrs = +(bd.tentativeMins / 60).toFixed(2);
+      hoursPerPlaceholder[info.name] = +((hoursPerPlaceholder[info.name] || 0) + confirmedHrs + tentativeHrs).toFixed(2);
       if (confirmedHrs <= 0 && tentativeHrs <= 0) continue;
       placeholderHoursFound++;
+
+      if (isPlcSubContract) {
+        // Always PLC, regardless of whatever department inference produced
+        // — the user wants this specifically counted as PLC team work.
+        const teamKey = `PLC|${wk.label}`;
+        if (!teamsMap[teamKey]) {
+          teamsMap[teamKey] = {
+            week: wk.label, team: 'PLC',
+            available_hours: 0, utilized_hours: 0, tentative_hours: 0,
+            sla_rota_hours: {}, sla_rota_tentative_hours: {},
+            unassigned_hours: 0, unassigned_tentative_hours: 0,
+            unassigned_by_name_hours: {}, unassigned_by_name_tentative_hours: {},
+            plc_subcontract_hours: 0, plc_subcontract_tentative_hours: 0,
+            _hc: new Set(),
+          };
+        }
+        const row = teamsMap[teamKey];
+        row.plc_subcontract_hours           = +((row.plc_subcontract_hours || 0) + confirmedHrs).toFixed(2);
+        row.plc_subcontract_tentative_hours = +((row.plc_subcontract_tentative_hours || 0) + tentativeHrs).toFixed(2);
+        continue;
+      }
+
       const share = info.departments.length || 1;
       for (const team of info.departments) {
         const teamKey = `${team}|${wk.label}`;
@@ -580,17 +616,22 @@ async function buildRawData(from, to) {
             available_hours: 0, utilized_hours: 0, tentative_hours: 0,
             sla_rota_hours: {}, sla_rota_tentative_hours: {},
             unassigned_hours: 0, unassigned_tentative_hours: 0,
+            unassigned_by_name_hours: {}, unassigned_by_name_tentative_hours: {},
+            plc_subcontract_hours: 0, plc_subcontract_tentative_hours: 0,
             _hc: new Set(),
           };
         }
         const row = teamsMap[teamKey];
         row.unassigned_hours           = +((row.unassigned_hours || 0) + confirmedHrs / share).toFixed(2);
         row.unassigned_tentative_hours = +((row.unassigned_tentative_hours || 0) + tentativeHrs / share).toFixed(2);
+        row.unassigned_by_name_hours[info.name] = +((row.unassigned_by_name_hours[info.name] || 0) + confirmedHrs / share).toFixed(2);
+        row.unassigned_by_name_tentative_hours[info.name] = +((row.unassigned_by_name_tentative_hours[info.name] || 0) + tentativeHrs / share).toFixed(2);
         // Deliberately NOT added to _hc (headcount) — not a real person.
       }
     }
   }
   console.log(`[Transform] Unassigned (Placeholder) hours: ${placeholderHoursFound} resource-week entries with bookings found across ${placeholderResourceInfo.size} known Placeholder resource(s)`);
+  console.log(`[Transform] Hours per individual Placeholder resource for ${from}→${to}: ${Object.entries(hoursPerPlaceholder).map(([n,h]) => `"${n}"=${h}h`).join(', ') || '(none had any bookings in this range)'}`);
 
   const teams = Object.values(teamsMap).map(({ _hc, ...rest }) => ({
     ...rest,
@@ -631,7 +672,7 @@ async function buildRawData(from, to) {
     engineers:      Object.values(engineersMap).sort((a, b) => a.week.localeCompare(b.week) || a.name.localeCompare(b.name)),
     engineer_list:  Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name)),
     resource_types: [...new Set(Object.values(engineerList).map(e => e.resourceType))].sort(),
-    meta: { fetched_at: new Date().toISOString(), weeks: weeks.length, sla_rota_projects: slaRotaProjectNames },
+    meta: { fetched_at: new Date().toISOString(), weeks: weeks.length, sla_rota_projects: slaRotaProjectNames, unassigned_placeholder_names: [...unassignedPlaceholderNames].sort() },
   };
 }
 
