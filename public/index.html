@@ -21,7 +21,7 @@
   .nav-tab{padding:18px 20px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;letter-spacing:.04em;white-space:nowrap}
   .nav-tab:hover{color:var(--text)}
   .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-  .page{display:none;padding:28px 32px;max-width:1600px;margin:0 auto}
+  .page{display:none;width:100%;box-sizing:border-box;padding:28px clamp(14px,4vw,48px)}
   .page.active{display:block}
   .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
   .page-title{font-size:22px;font-weight:800;letter-spacing:-.02em}
@@ -546,17 +546,17 @@
     <div class="settings-section-title">Unassigned / Placeholder Work</div>
     <div class="settings-row-desc" style="margin-bottom:8px">Work booked against a department before a specific engineer is assigned. Shown as a dashed line above each department's solid utilisation line — never counted as an individual engineer's hours.</div>
     <div class="settings-row">
-      <div><div class="settings-row-label">Show Unassigned Work Overlay</div><div class="settings-row-desc">Master on/off for this feature across all departments</div></div>
+      <div><div class="settings-row-label">Show Unassigned Work Overlay</div><div class="settings-row-desc">Master on/off for this feature across all placeholders</div></div>
       <label class="toggle"><input type="checkbox" id="s-showUnassigned" onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
-    <div class="settings-row-desc" style="margin:8px 0">Fine-tune per department (only applies while the master toggle above is on):</div>
-    <input class="settings-search" id="unassigned-dept-search" placeholder="Search departments..." oninput="filterUnassignedDeptList()">
-    <div class="settings-filter-list" id="unassigned-dept-filter-list">
+    <div class="settings-row-desc" style="margin:8px 0">Fine-tune per individual placeholder (only applies while the master toggle above is on):</div>
+    <input class="settings-search" id="unassigned-name-search" placeholder="Search placeholders..." oninput="filterUnassignedNameList()">
+    <div class="settings-filter-list" id="unassigned-name-filter-list">
       <div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">Loading...</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button onclick="setAllUnassignedDepts(true)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Include All</button>
-      <button onclick="setAllUnassignedDepts(false)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Exclude All</button>
+      <button onclick="setAllUnassignedNames(true)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Include All</button>
+      <button onclick="setAllUnassignedNames(false)" style="flex:1;padding:6px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;cursor:pointer;font-size:11px">Exclude All</button>
     </div>
   </div>
   <div class="settings-section">
@@ -580,6 +580,10 @@
     <div class="settings-row">
       <div><div class="settings-row-label">Include Contractors</div><div class="settings-row-desc">Contract / freelance workers</div></div>
       <label class="toggle"><input type="checkbox" id="s-contractors" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-row-label">Include PLC Sub Contract</div><div class="settings-row-desc">Counted as real PLC team work (solid line), not the unassigned-work overlay</div></div>
+      <label class="toggle"><input type="checkbox" id="s-plcSubContract" checked onchange="applySettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
   <div class="settings-section">
@@ -684,7 +688,7 @@ let phaseCounter = 0;
 let editingPhaseSnapshots = {};
 let tableRows = [];
 let engTableRows = [];
-let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false, showUnassigned:true };
+let SETTINGS = { confirmed:true, tentative:false, employees:true, contractors:true, directors:true, managers:true, staff:true, showDates:false, showCategoryTags:false, showUnassigned:true, plcSubContract:true };
 // Department visibility: null = all visible; Set of hidden dept names
 let HIDDEN_DEPTS   = new Set();
 // People visibility: null = all visible; Set of hidden person names
@@ -696,13 +700,13 @@ let CONTRACTOR_OVERRIDES = new Set();
 // count its hours — mirrors the per-employee/per-department checklist
 // pattern rather than one blanket toggle.
 let INCLUDED_SLA_PROJECTS = new Set();
-// Unassigned/Placeholder work overlay: empty by default = every department
-// with placeholder-derived unassigned hours shows the dashed overlay line.
-// Add a department name here to hide just that one department's overlay
-// individually — mirrors the SLA-rota checklist pattern. The master
-// SETTINGS.showUnassigned toggle turns the whole feature off/on at once;
-// this set lets you fine-tune per department on top of that.
-let EXCLUDED_UNASSIGNED_DEPTS = new Set();
+// Unassigned/Placeholder work overlay: empty by default = every individual
+// placeholder (e.g. "U Design", "U Robot Commissioning") shows in the
+// dashed overlay line. Add a placeholder name here to hide just that one
+// individually — same granular pattern as the per-employee checklist. The
+// master SETTINGS.showUnassigned toggle turns the whole feature off/on at
+// once; this set lets you fine-tune per placeholder on top of that.
+let EXCLUDED_UNASSIGNED_NAMES = new Set();
 // Currently active custom date range (null = using the server's default
 // range). Tracked so a page refresh, or the periodic background refresh
 // below, doesn't silently snap back to the default range while a custom
@@ -730,6 +734,7 @@ function applySettings() {
     showDates:   document.getElementById('s-showDates').checked,
     showCategoryTags: document.getElementById('s-showCategoryTags').checked,
     showUnassigned:   document.getElementById('s-showUnassigned').checked,
+    plcSubContract:   document.getElementById('s-plcSubContract').checked,
   };
   renderUtilisation(); renderHeatmap();
   if (document.getElementById('page-engineers').classList.contains('active')) renderEngineers();
@@ -803,6 +808,22 @@ function getFilteredTeams() {
       map[key]._hc.add(r.name);
     }
   }
+  // PLC Sub Contract — a Placeholder resource counted as real PLC team work
+  // (not the generic unassigned-work overlay). It lives only on RAW.teams
+  // (server-side team aggregate), never on RAW.engineers, since it isn't a
+  // real person — so it's added here as a second pass rather than in the
+  // per-engineer loop above.
+  if (SETTINGS.plcSubContract && !HIDDEN_DEPTS.has('PLC')) {
+    for (const r of RAW.teams) {
+      if (r.team !== 'PLC') continue;
+      const hrs = (SETTINGS.confirmed ? (r.plc_subcontract_hours||0) : 0)
+                + (SETTINGS.tentative  ? (r.plc_subcontract_tentative_hours||0) : 0);
+      if (hrs <= 0) continue;
+      const key = 'PLC|'+r.week;
+      if (!map[key]) map[key] = { week:r.week, team:'PLC', available_hours:0, utilized_hours:0, _hc:new Set() };
+      map[key].utilized_hours += hrs;
+    }
+  }
   return Object.values(map).map(({_hc,...rest})=>({...rest,headcount:_hc.size}));
 }
 function getFilteredEngineers() {
@@ -828,6 +849,30 @@ function getFilteredEngineers() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// Fixed display order for departments — any department not in this list
+// (e.g. "Unassigned", "Manager", "Integration", "Control Panels - Telford")
+// is appended after these, alphabetically.
+const DEPT_ORDER = [
+  'Projects', 'Design', 'Control Panels - Notts', 'Electrical Installation',
+  'PLC', 'PLC - Amazon', 'Robotics', 'HELIX', 'Service', 'Office', 'Director',
+];
+function sortByDeptOrder(teams) {
+  return [...teams].sort((a, b) => {
+    const ia = DEPT_ORDER.indexOf(a), ib = DEPT_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1; // a is in the fixed order, b isn't — a comes first
+    if (ib !== -1) return 1;
+    return a.localeCompare(b); // neither in the fixed order — alphabetical
+  });
+}
+// Teams to actually show in charts/tables/dropdowns — excludes hidden
+// departments and applies the fixed display order. ALL_TEAMS itself stays
+// the full unfiltered list (needed by the Settings checklist so a hidden
+// department can still be found and re-enabled).
+function getVisibleTeams() {
+  return sortByDeptOrder(ALL_TEAMS.filter(t => !HIDDEN_DEPTS.has(t)));
+}
+
 function init() {
   ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort();
   ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
@@ -844,7 +889,7 @@ function init() {
 }
 
 function populateSelects() {
-  const tOpts = ALL_TEAMS.map(t=>`<option value="${t}">${t}</option>`).join('');
+  const tOpts = getVisibleTeams().map(t=>`<option value="${t}">${t}</option>`).join('');
   const wOpts = ALL_WEEKS.map(w=>`<option value="${w}">${w}</option>`).join('');
   document.getElementById('team-filter').innerHTML = '<option value="ALL">All Teams</option>'+tOpts;
   document.getElementById('heatmap-filter').innerHTML = '<option value="ALL">All Teams</option>'+tOpts;
@@ -1042,15 +1087,24 @@ function renderUtilisation(){
 // aggregated from Placeholder-type resources — never attributed to an
 // individual engineer, so it isn't visible via getFilteredTeams()/RAW.engineers
 // at all). This builds a quick team+week lookup for it, respecting
-// department visibility, the master on/off toggle, per-department
-// inclusion, and the tentative toggle same as everything else.
+// department visibility, the master on/off toggle, per-placeholder
+// inclusion (by name), and the tentative toggle same as everything else.
 function getUnassignedLookup(){
   const map={};
   if(!SETTINGS.showUnassigned) return map; // master toggle off — nothing shown at all
   for(const r of RAW.teams){
     if(HIDDEN_DEPTS.has(r.team)) continue;
-    if(EXCLUDED_UNASSIGNED_DEPTS.has(r.team)) continue; // this specific department turned off individually
-    const hrs=(r.unassigned_hours||0)+(SETTINGS.tentative?(r.unassigned_tentative_hours||0):0);
+    let hrs=0;
+    for(const [name,h] of Object.entries(r.unassigned_by_name_hours||{})){
+      if(EXCLUDED_UNASSIGNED_NAMES.has(name)) continue;
+      hrs+=h;
+    }
+    if(SETTINGS.tentative){
+      for(const [name,h] of Object.entries(r.unassigned_by_name_tentative_hours||{})){
+        if(EXCLUDED_UNASSIGNED_NAMES.has(name)) continue;
+        hrs+=h;
+      }
+    }
     map[r.team+'|'+r.week]=(map[r.team+'|'+r.week]||0)+hrs;
   }
   return map;
@@ -1058,7 +1112,7 @@ function getUnassignedLookup(){
 
 function aggregateTeamWeekly(teamFilter,weeks){
   const ft=getFilteredTeams();
-  const teams=teamFilter==='ALL'?ALL_TEAMS:[teamFilter];
+  const teams=teamFilter==='ALL'?getVisibleTeams():[teamFilter];
   const data={};
   for(const t of teams){ data[t]={}; for(const w of weeks) data[t][w]={avail:0,util:0}; }
   for(const r of ft){
@@ -1075,7 +1129,7 @@ function renderTeamView(tf,weeks){
   document.getElementById('chart-title').textContent='Weekly Utilisation by Team';
   document.getElementById('table-title').textContent='Team Breakdown';
   const data=aggregateTeamWeekly(tf,weeks);
-  const teams=tf==='ALL'?ALL_TEAMS:[tf];
+  const teams=tf==='ALL'?getVisibleTeams():[tf];
   let ta=0,tu=0,maxU=0,maxT='',over=0;
   for(const t of teams){
     let a=0,u=0;
@@ -1161,7 +1215,7 @@ function renderHeatmap(){
     const ti = ALL_WEEKS.indexOf(heatmapWeekFilter.to);
     if (fi >= 0 && ti >= 0) weeks = ALL_WEEKS.slice(Math.min(fi,ti), Math.max(fi,ti)+1);
   }
-  const teams=tf==='ALL'?ALL_TEAMS:[tf];
+  const teams=tf==='ALL'?getVisibleTeams():[tf];
   const data=aggregateTeamWeekly(tf,weeks);
   function hmClass(p){if(p===0)return'hm-0';if(p<40)return'hm-1';if(p<70)return'hm-2';if(p<85)return'hm-3';if(p<95)return'hm-4';return'hm-5';}
   // Table is width:auto so it only takes as much space as needed
@@ -2435,7 +2489,7 @@ function saveState() {
       hiddenPeople:            [...HIDDEN_PEOPLE],
       contractorOverrides:     [...CONTRACTOR_OVERRIDES],
       includedSlaProjects:     [...INCLUDED_SLA_PROJECTS],
-      excludedUnassignedDepts: [...EXCLUDED_UNASSIGNED_DEPTS],
+      excludedUnassignedNames: [...EXCLUDED_UNASSIGNED_NAMES],
       currentRangeFrom:        CURRENT_RANGE_FROM,
       currentRangeTo:          CURRENT_RANGE_TO,
       savedHighlight:          savedHighlight,
@@ -2479,7 +2533,7 @@ function restoreState() {
     if (Array.isArray(s.hiddenPeople))        HIDDEN_PEOPLE        = new Set(s.hiddenPeople);
     if (Array.isArray(s.contractorOverrides)) CONTRACTOR_OVERRIDES = new Set(s.contractorOverrides);
     if (Array.isArray(s.includedSlaProjects)) INCLUDED_SLA_PROJECTS = new Set(s.includedSlaProjects);
-    if (Array.isArray(s.excludedUnassignedDepts)) EXCLUDED_UNASSIGNED_DEPTS = new Set(s.excludedUnassignedDepts);
+    if (Array.isArray(s.excludedUnassignedNames)) EXCLUDED_UNASSIGNED_NAMES = new Set(s.excludedUnassignedNames);
     if (s.currentRangeFrom && s.currentRangeTo) {
       CURRENT_RANGE_FROM = s.currentRangeFrom;
       CURRENT_RANGE_TO   = s.currentRangeTo;
@@ -2546,7 +2600,7 @@ function buildSettingsLists() {
   buildPeopleList();
   buildContractorList();
   buildSlaProjectList();
-  buildUnassignedDeptList();
+  buildUnassignedNameList();
 }
 
 function buildDeptList(filter='') {
@@ -2604,34 +2658,41 @@ function setAllSlaProjects(included) {
 // Departments that have any Placeholder-derived unassigned work anywhere in
 // the currently loaded data — built dynamically from RAW.teams so new
 // departments with placeholder bookings show up automatically.
-function getDeptsWithUnassignedWork(){
-  const depts = new Set();
-  for (const r of RAW.teams) {
-    if ((r.unassigned_hours||0) > 0 || (r.unassigned_tentative_hours||0) > 0) depts.add(r.team);
+function getPlaceholderNamesWithWork(){
+  // Prefer the server-exposed full list (covers names with zero hours in
+  // the current view too), falling back to scanning actual data if that's
+  // not available for some reason.
+  if (RAW.meta?.unassigned_placeholder_names?.length) {
+    return [...RAW.meta.unassigned_placeholder_names].sort();
   }
-  return [...depts].sort();
+  const names = new Set();
+  for (const r of RAW.teams) {
+    Object.keys(r.unassigned_by_name_hours || {}).forEach(n => names.add(n));
+    Object.keys(r.unassigned_by_name_tentative_hours || {}).forEach(n => names.add(n));
+  }
+  return [...names].sort();
 }
-function buildUnassignedDeptList(filter='') {
-  const list = document.getElementById('unassigned-dept-filter-list');
+function buildUnassignedNameList(filter='') {
+  const list = document.getElementById('unassigned-name-filter-list');
   if (!list) return;
-  const depts = getDeptsWithUnassignedWork().filter(d => d.toLowerCase().includes(filter.toLowerCase()));
-  if (!depts.length) { list.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center">No unassigned/placeholder work found</div>'; return; }
-  list.innerHTML = depts.map(d => `
+  const names = getPlaceholderNamesWithWork().filter(n => n.toLowerCase().includes(filter.toLowerCase()));
+  if (!names.length) { list.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px;text-align:center">No unassigned/placeholder work found</div>'; return; }
+  list.innerHTML = names.map(n => `
     <div class="settings-filter-item">
-      <label><input type="checkbox" ${EXCLUDED_UNASSIGNED_DEPTS.has(d)?'':'checked'} onchange="toggleUnassignedDept('${d.replace(/'/g,"\\'")}',this.checked)"> ${d}</label>
+      <label><input type="checkbox" ${EXCLUDED_UNASSIGNED_NAMES.has(n)?'':'checked'} onchange="toggleUnassignedName('${n.replace(/'/g,"\\'")}',this.checked)"> ${n}</label>
     </div>`).join('');
 }
-function filterUnassignedDeptList(){ buildUnassignedDeptList(document.getElementById('unassigned-dept-search')?.value||''); }
-function toggleUnassignedDept(name, included) {
-  if (included) EXCLUDED_UNASSIGNED_DEPTS.delete(name); else EXCLUDED_UNASSIGNED_DEPTS.add(name);
+function filterUnassignedNameList(){ buildUnassignedNameList(document.getElementById('unassigned-name-search')?.value||''); }
+function toggleUnassignedName(name, included) {
+  if (included) EXCLUDED_UNASSIGNED_NAMES.delete(name); else EXCLUDED_UNASSIGNED_NAMES.add(name);
   applyFilters();
   saveState();
 }
-function setAllUnassignedDepts(included) {
-  const depts = getDeptsWithUnassignedWork();
-  if (included) depts.forEach(d => EXCLUDED_UNASSIGNED_DEPTS.delete(d));
-  else depts.forEach(d => EXCLUDED_UNASSIGNED_DEPTS.add(d));
-  buildUnassignedDeptList(document.getElementById('unassigned-dept-search')?.value||'');
+function setAllUnassignedNames(included) {
+  const names = getPlaceholderNamesWithWork();
+  if (included) names.forEach(n => EXCLUDED_UNASSIGNED_NAMES.delete(n));
+  else names.forEach(n => EXCLUDED_UNASSIGNED_NAMES.add(n));
+  buildUnassignedNameList(document.getElementById('unassigned-name-search')?.value||'');
   applyFilters();
   saveState();
 }
