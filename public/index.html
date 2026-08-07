@@ -1258,7 +1258,7 @@ function renderEngineers(){
   engChart=new Chart(ctx,{
     type:'bar',
     data:{labels:top.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' ')),datasets:[{label:'Utilisation %',data:pcts,backgroundColor:pcts.map(p=>getUtilColor(p)),borderRadius:6}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw}% utilised`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,max:100,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw}% utilised`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,suggestedMax:100,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},
     plugins:[redLine80]
   });
   engTableRows=engs.map(e=>({...e,pct:e.avail>0?e.util/e.avail*100:0}));
@@ -2330,7 +2330,7 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
           saveState();
         }
       },tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw!=null?c.raw+'%':'—'}`}}},
-      scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,max:isBar?100:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},
+      scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,suggestedMax:isBar?100:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},
     plugins:[redZonePlugin]
   });
   setter(chart);
