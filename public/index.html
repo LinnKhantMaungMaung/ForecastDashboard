@@ -874,7 +874,7 @@ function getVisibleTeams() {
 }
 
 function init() {
-  ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort();
+  ALL_WEEKS = [...new Set(RAW.teams.map(r=>r.week))].sort(compareWeekLabels);
   ALL_TEAMS = [...new Set(RAW.teams.map(r=>r.team))].sort();
   const sub = document.getElementById('util-subtitle');
   if (sub && ALL_WEEKS.length) {
@@ -2209,7 +2209,7 @@ function renderGantt(){
   if(!forecastProjects.length){c.innerHTML='<div class="empty">Add a project first.</div>';return;}
   const aw=new Set();
   forecastProjects.forEach(p=>p.phases.forEach(ph=>ph.weeksSpan.forEach(w=>aw.add(w))));
-  const gw=[...aw].sort();
+  const gw=[...aw].sort(compareWeekLabels);
   const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399'];
   let h=`<table style="border-collapse:separate;border-spacing:2px;min-width:100%"><thead><tr><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);background:transparent;white-space:nowrap">Phase</th>`;
   gw.forEach(w=>{h+=`<th style="font-size:10px;color:var(--muted);background:transparent;padding:4px 2px;text-align:center;min-width:34px">${weekColumnLabel(w)}</th>`;});
@@ -2343,6 +2343,19 @@ function toWeekLabel(date){
   d.setUTCDate(d.getUTCDate()+4-dn);
   const ys=new Date(Date.UTC(d.getUTCFullYear(),0,1));
   return`${d.getUTCFullYear()} W${Math.ceil((((d-ys)/86400000)+1)/7)}`;
+}
+
+// Correct chronological comparator for "YYYY Www" week labels — plain
+// string sort puts "2026 W9" AFTER "2026 W53" (comparing character by
+// character, '3' < '9'), even though week 9 comes months earlier in the
+// year. Parses year and week number out and compares them numerically.
+function compareWeekLabels(a, b) {
+  const pa = (a||'').match(/(\d+)\s*W\s*(\d+)/i);
+  const pb = (b||'').match(/(\d+)\s*W\s*(\d+)/i);
+  if (!pa || !pb) return (a||'').localeCompare(b||''); // fallback for unexpected formats
+  const yearDiff = Number(pa[1]) - Number(pb[1]);
+  if (yearDiff !== 0) return yearDiff;
+  return Number(pa[2]) - Number(pb[2]);
 }
 
 // ── Exact date range helpers (Fix 2) ───────────────────────────────────────────
@@ -2901,8 +2914,7 @@ async function fetchCustomRange() {
     CURRENT_RANGE_FROM = from;
     CURRENT_RANGE_TO   = to;
     init();
-    setTimeout(restoreState, 100);
-    saveState();
+    setTimeout(() => { restoreState(); saveState(); }, 100);
     if (status) status.textContent = `✓ Loaded ${[...new Set(data.teams.map(r=>r.week))].length} weeks`;
   } catch(err) {
     if (status) status.textContent = `✗ Error: ${err.message}`;
@@ -2930,8 +2942,7 @@ async function resetToDefaultRange() {
       if (el) el.value = '';
     });
     init();
-    setTimeout(restoreState, 100);
-    saveState();
+    setTimeout(() => { restoreState(); saveState(); }, 100);
     if (status) status.textContent = `✓ Reset to default (${[...new Set(data.teams.map(r=>r.week))].length} weeks)`;
   } catch(err) {
     if (status) status.textContent = `✗ Error: ${err.message}`;
@@ -2987,7 +2998,7 @@ async function loadLiveData(){
     const info=document.getElementById('ai-data-info');
     if(info){
       const engs=[...new Set(RAW.engineers.map(e=>e.name))].length;
-      const wks=[...new Set(RAW.teams.map(r=>r.week))].sort();
+      const wks=[...new Set(RAW.teams.map(r=>r.week))].sort(compareWeekLabels);
       info.textContent=`${engs} engineers · ${[...new Set(RAW.teams.map(r=>r.team))].length} teams · ${wks.length} weeks`;
     }
     init();
