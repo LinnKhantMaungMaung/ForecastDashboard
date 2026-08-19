@@ -857,8 +857,25 @@ const DEPT_ORDER = [
   'PLC', 'PLC - Amazon', 'Robotics', 'HELIX', 'Service', 'Office', 'Director',
 ];
 function sortByDeptOrder(teams) {
+  // Resolve a department's position in the fixed order: exact match first,
+  // then fall back to prefix matching (e.g. "HELIX - Product" isn't listed
+  // explicitly, but starts with "HELIX", so it lands in the same relative
+  // spot as the original "HELIX" entry would have). This means a future
+  // department split/rename in RG doesn't silently fall to "unlisted,
+  // alphabetical at the end" the way a pure exact-match lookup would —
+  // exactly the kind of hardcoding that broke when HELIX was split into
+  // HELIX - Product / HELIX - Project.
+  function getOrderIndex(name) {
+    const exact = DEPT_ORDER.indexOf(name);
+    if (exact !== -1) return exact;
+    const lower = (name || '').toLowerCase();
+    for (let i = 0; i < DEPT_ORDER.length; i++) {
+      if (lower.startsWith(DEPT_ORDER[i].toLowerCase() + ' ')) return i;
+    }
+    return -1;
+  }
   return [...teams].sort((a, b) => {
-    const ia = DEPT_ORDER.indexOf(a), ib = DEPT_ORDER.indexOf(b);
+    const ia = getOrderIndex(a), ib = getOrderIndex(b);
     if (ia !== -1 && ib !== -1) return ia - ib;
     if (ia !== -1) return -1; // a is in the fixed order, b isn't — a comes first
     if (ib !== -1) return 1;
