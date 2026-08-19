@@ -338,8 +338,16 @@ app.post('/api/parse-mpp-ai', require('express').raw({ type: 'application/octet-
   const rawStrings = (extracted.raw_strings || []).slice(0, 120);
   if (rawStrings.length === 0) return res.status(422).json({ error: 'No task data found in MPP file' });
 
-  const availableTeams = ['Design','HELIX','Electrical Installation','Control Panels - Notts',
-    'PLC','PLC - Amazon','Robotics','Projects','Service','Director','Unassigned'];
+  // Pulled dynamically from whatever's currently cached for the default
+  // range, instead of a hardcoded list — a hardcoded list goes stale the
+  // moment departments change in RG (e.g. HELIX being split into
+  // "HELIX - Product" / "HELIX - Project"), silently offering Claude
+  // department names that may not even exist anymore.
+  const defaultCacheKey = rangeKey(DEFAULT_RANGE.from, DEFAULT_RANGE.to);
+  const cachedTeams = rangeCaches.get(defaultCacheKey)?.data?.teams;
+  const availableTeams = Array.isArray(cachedTeams) && cachedTeams.length
+    ? [...new Set(cachedTeams.map(t => t.team))].sort()
+    : ['Unassigned']; // safe minimal fallback if cache isn't warm yet — avoids offering stale hardcoded names
 
   const teamList = availableTeams.join(', ');
   const stringList = rawStrings.join('\n');
@@ -350,7 +358,7 @@ app.post('/api/parse-mpp-ai', require('express').raw({ type: 'application/octet-
     '[{"name":"task name","team":"team from list","dur_weeks":2,"start_offset_weeks":0,"is_summary":false}]\n\n' +
     'Rules:\n' +
     '- Section headers (Design: Electrical, Build:, Commissioning: etc) = is_summary true\n' +
-    '- Match team from context: Design Engineer/Electrical -> Design, Control Systems/PLC tasks -> PLC, Commissioning -> PLC, Install -> Electrical Installation, Panel Build -> Control Panels - Notts, Software/HELIX -> HELIX, Project Manager -> Projects\n' +
+    '- Match team from context using the "Available teams" list above (e.g. a task mentioning Design Engineer/Electrical work maps to whichever available team represents Design; Commissioning/Control Systems work maps to whichever represents PLC; Install work maps to whichever represents Electrical Installation; Panel Build work maps to whichever represents panel/control-panel work; Software work maps to whichever available team represents that specialism). Use the exact team name as it appears in the list — do not invent or assume a team name that isn\'t in it.\n' +
     '- dur_weeks: estimate from name (14 days=3w, 5 days=1w, 4 wks=4w, default 2)\n' +
     '- start_offset_weeks: cumulative sequential offset from 0\n' +
     '- Skip: standalone resource name strings, payment terms, UI strings like Gantt/Timeline';
