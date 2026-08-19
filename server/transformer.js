@@ -36,22 +36,19 @@ function buildWeeks(from, to) {
   return weeks;
 }
 
-// Fallback team from job title — only used if no department set in RG
+// Fallback team from job title — DEPRECATED as a name-guessing mechanism.
+// This used to hardcode specific team names per job-title pattern (e.g.
+// "Software" -> "HELIX"), which goes stale every time the actual RG
+// department structure changes — exactly what happened when HELIX was
+// split into "HELIX - Product" / "HELIX - Project". Any hardcoded team
+// name baked into our code can't follow that kind of change automatically;
+// only RG's own Department custom field (read dynamically elsewhere in
+// this file, via deptOptionLookup) can. So this is now just a bare
+// fallback — 'Unassigned' honestly reflects "no department set in RG",
+// which is the correct signal to fix in RG directly rather than have us
+// silently paper over it with a guess that may not even be a real
+// department anymore.
 function getTeamFromJobTitle(jt) {
-  if (!jt) return 'Unassigned';
-  if (/Installation Electrician|Electrical Labourer|QA Co-ordinator|\[SL\]Engineering Manager/i.test(jt)) return 'Electrical Installation';
-  if (/PLC.?Amazon|Amazon/i.test(jt)) return 'PLC - Amazon';
-  if (/Controls Engineer|Head of Controls|Controls Manager|Controls Site/i.test(jt)) return 'PLC';
-  if (/Project Engineer|Project Manager|Head of Automation|Head of Service|Automation Project|Senior Project/i.test(jt)) return 'Projects';
-  if (/Service Engineer|Service Manager|Senior Service|Field Service/i.test(jt)) return 'Service';
-  if (/Design Engineer|Lead Design|Junior Design/i.test(jt)) return 'Design';
-  if (/Software|WCS|WMS|Senior Software|Graduate Software/i.test(jt)) return 'HELIX';
-  if (/Robotics/i.test(jt)) return 'Robotics';
-  if (/Workshop|Apprentice/i.test(jt)) return 'Control Panels - Notts';
-  if (/Director|Managing Director|Executive Director|Technical Director|Integration Director|Operations Director/i.test(jt)) return 'Director';
-  if (/Accounts|Business Support|Supply Chain|Logistics/i.test(jt)) return 'Office';
-  if (/R&D/i.test(jt)) return 'R&D Engineer';
-  if (/Control Systems Business Development/i.test(jt)) return 'Control Systems Business Development Architect';
   return 'Unassigned';
 }
 
