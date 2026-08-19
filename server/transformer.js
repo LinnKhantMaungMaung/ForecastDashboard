@@ -303,7 +303,16 @@ async function buildRawData(from, to) {
         if (/\bamazon\b/i.test(name))               return 'PLC - Amazon';
         if (/\brobot/i.test(name))                   return 'Robotics';
         if (/\binstall\b/i.test(name))                return 'Electrical Installation';
-        if (/\bhelix\b/i.test(name))                 return 'HELIX';
+        // "HELIX" alone no longer exists as a real department — it was
+        // split into "HELIX - Product" / "HELIX - Project" (confirmed via
+        // real account data). Names like "Helix Commissioning Support" or
+        // "HELIX Escalation Rota" don't disambiguate which of the two they
+        // belong to, so this defaults to "HELIX - Project" as the closer
+        // reading (commissioning/escalation support reads as delivery
+        // work, not product strategy) — but this is a genuine guess. If
+        // it's wrong for a specific placeholder, that's a one-line fix
+        // here rather than a real bug to chase further.
+        if (/\bhelix\b/i.test(name))                 return 'HELIX - Project';
         if (/\bproject management\b/i.test(name))    return 'Projects';
         if (/\bpanel\b|\bsub ?con\b/i.test(name))    return 'Control Panels - Notts';
         if (/\bplc\b|\bcontrols\b/i.test(name))      return 'PLC';
