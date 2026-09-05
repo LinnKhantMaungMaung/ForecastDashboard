@@ -376,6 +376,7 @@ async function buildRawData(from, to) {
   const teamsMap     = {};
   const engineersMap = {};
   const engineerList = {};
+  const failedWeeks = []; // tracked so a silent per-week failure doesn't just vanish unnoticed
 
   for (let i = 0; i < weeks.length; i++) {
     const wk = weeks[i];
@@ -383,8 +384,21 @@ async function buildRawData(from, to) {
     try {
       report = await fetchReportRange(wk.from, wk.to);
     } catch (err) {
-      console.warn(`[Transform] Week ${wk.label} failed: ${err.message}`);
-      continue;
+      // One retry after a short pause — covers transient network blips
+      // without masking a real, persistent failure (e.g. Resource Guru's
+      // report endpoint being unreliable for far-future date queries,
+      // which is a very plausible explanation for a multi-year range
+      // silently losing its later weeks over time).
+      console.warn(`[Transform] Week ${wk.label} failed (attempt 1): ${err.message} — retrying once...`);
+      await sleep(1000);
+      try {
+        report = await fetchReportRange(wk.from, wk.to);
+        console.log(`[Transform] Week ${wk.label} succeeded on retry`);
+      } catch (err2) {
+        console.warn(`[Transform] Week ${wk.label} failed again (attempt 2): ${err2.message} — giving up on this week`);
+        failedWeeks.push({ week: wk.label, error: err2.message });
+        continue;
+      }
     }
 
     const resources = Array.isArray(report)
@@ -556,7 +570,7 @@ async function buildRawData(from, to) {
       }
     }
 
-    await sleep(150);
+    await sleep(320);
     if ((i + 1) % 5 === 0) console.log(`[Transform] ${i + 1}/${weeks.length} weeks done`);
   }
 
@@ -656,6 +670,11 @@ async function buildRawData(from, to) {
   console.log(`[Transform] Done — ${teams.length} team-week rows, ${Object.keys(engineersMap).length} engineer-week rows`);
   console.log(`[Transform] Teams: ${teamNames.join(', ')}`);
 
+  if (failedWeeks.length > 0) {
+    console.warn(`[Transform] ⚠ ${failedWeeks.length} of ${weeks.length} week(s) FAILED to fetch even after retry and are MISSING from the results (not silently ignored — flagged here on purpose): ${failedWeeks.map(f => `${f.week} (${f.error})`).join('; ')}`);
+    console.warn(`[Transform] If these failed weeks cluster toward the far end of a long date range, it likely means Resource Guru's report endpoint is unreliable for queries that far in the future — worth checking whether this repeats on rebuild for the same weeks.`);
+  }
+
   // PLACEHOLDER DIAGNOSTIC (part 2): total unassigned hours that actually
   // made it into the final data, per team. If Placeholder resources WERE
   // detected above but this shows all zeros, it means they simply have no
@@ -678,7 +697,7 @@ async function buildRawData(from, to) {
     engineers:      Object.values(engineersMap).sort((a, b) => a.week.localeCompare(b.week) || a.name.localeCompare(b.name)),
     engineer_list:  Object.values(engineerList).sort((a, b) => a.team.localeCompare(b.team) || a.name.localeCompare(b.name)),
     resource_types: [...new Set(Object.values(engineerList).map(e => e.resourceType))].sort(),
-    meta: { fetched_at: new Date().toISOString(), weeks: weeks.length, sla_rota_projects: slaRotaProjectNames, unassigned_placeholder_names: [...unassignedPlaceholderNames].sort() },
+    meta: { fetched_at: new Date().toISOString(), weeks: weeks.length, sla_rota_projects: slaRotaProjectNames, unassigned_placeholder_names: [...unassignedPlaceholderNames].sort(), failed_weeks: failedWeeks },
   };
 }
 
