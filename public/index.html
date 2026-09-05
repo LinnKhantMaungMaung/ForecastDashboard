@@ -3015,6 +3015,26 @@ async function loadLiveData(){
     const res=await fetch(url);
     if(!res.ok)throw new Error(`HTTP ${res.status}`);
     const data=await res.json();
+
+    // NOTE: previously this also auto-forced a rebuild (refresh=1) whenever
+    // the cached data's last week didn't match the requested end date.
+    // Removed — the "don't repeat" guard didn't actually survive across
+    // scheduled polls, so if the mismatch was caused by something
+    // persistent (not a one-off transient failure), EVERY poll — every 45
+    // seconds to 5 minutes, indefinitely — triggered another full 100+-call
+    // rebuild. That's strictly worse than the original problem: constant,
+    // repeated, expensive rebuilds hammering the Resource Guru API instead
+    // of an occasional stale result. Now this just warns visibly and lets
+    // the user decide whether to hit "Refresh Now" themselves.
+    if (CURRENT_RANGE_TO) {
+      const expectedLastWeek = toWeekLabel(new Date(CURRENT_RANGE_TO));
+      const actualWeeks = [...new Set((data.teams||[]).map(r=>r.week))].sort(compareWeekLabels);
+      const actualLastWeek = actualWeeks[actualWeeks.length-1];
+      if (actualLastWeek && actualLastWeek !== expectedLastWeek) {
+        console.warn(`[Dashboard] Cached data for this range ends at ${actualLastWeek}, but ${expectedLastWeek} was requested. Not auto-rebuilding (that caused repeated rebuild loops) — click "Refresh Now" in Settings if you want to try rebuilding this range.`);
+      }
+    }
+
     // Only re-render if data has changed
     const newSig=data.meta?.fetched_at;
     if(newSig&&newSig===RAW.meta?.fetched_at){setStatus('ok','');setTimeout(loadLiveData,300000);return;}
