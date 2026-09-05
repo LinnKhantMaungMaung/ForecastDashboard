@@ -75,20 +75,13 @@ function isEntryValid(entry) {
 
 // Fetch (or build) the data for a specific {from, to} range.
 // forceRefresh bypasses a still-valid cache entry and rebuilds.
-// A flat 15-minute TTL makes sense for the default ~6-month view (people
-// want that reasonably live), but is actively counterproductive for a
-// multi-year custom range: rebuilding it means 100+ sequential API calls,
-// each a chance for a transient failure, and re-doing that every 15
-// minutes just to keep data fresh 18 months out (where nothing meaningful
-// changes minute-to-minute anyway) is pure risk for no benefit. Once a
-// long range is successfully built, it's far better to leave it cached and
-// let the user hit "Refresh Now" when they actually want the latest data,
-// than to silently re-attempt it in the background every 15 minutes.
-function ttlForRange(from, to) {
-  const weeks = (new Date(to) - new Date(from)) / (7 * 86400000);
-  return weeks > 52 ? 12 * 60 * 60 * 1000 /* 12 hours */ : RANGE_CACHE_TTL_MS /* 15 minutes */;
-}
-
+// NOTE: previously tried scaling this TTL up for long ranges (12 hours
+// instead of 15 minutes), reasoning that a successfully-built long range
+// shouldn't need frequent rebuilding. Reverted — if the range's build is
+// EVER incomplete for a persistent (not transient) reason, a long TTL
+// locks in that broken result for 12 hours instead of 15 minutes, which is
+// strictly worse. Keeping a flat, short TTL everywhere until the actual
+// root cause of incomplete long-range builds is confirmed and fixed.
 async function getDataForRange(from, to, forceRefresh = false) {
   pruneExpiredCaches();
   const key = rangeKey(from, to);
@@ -113,7 +106,7 @@ async function getDataForRange(from, to, forceRefresh = false) {
       const raw = await buildRawData(from, to);
       entry.data      = raw;
       entry.fetchedAt = new Date();
-      entry.expiresAt = new Date(Date.now() + ttlForRange(from, to));
+      entry.expiresAt = new Date(Date.now() + RANGE_CACHE_TTL_MS);
       console.log(`[Cache] Range ${key} ready — ${raw.teams.length} team-week rows, ${raw.engineers.length} engineer-week rows`);
       return raw;
     } finally {
