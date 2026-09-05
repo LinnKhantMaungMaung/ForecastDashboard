@@ -2564,9 +2564,23 @@ function restoreState() {
     if (Array.isArray(s.contractorOverrides)) CONTRACTOR_OVERRIDES = new Set(s.contractorOverrides);
     if (Array.isArray(s.includedSlaProjects)) INCLUDED_SLA_PROJECTS = new Set(s.includedSlaProjects);
     if (Array.isArray(s.excludedUnassignedNames)) EXCLUDED_UNASSIGNED_NAMES = new Set(s.excludedUnassignedNames);
+    // IMPORTANT: only let this set CURRENT_RANGE_FROM/TO if they aren't
+    // already active. This function gets called both on initial page load
+    // (where restoring from storage into these is exactly right) AND
+    // right after fetchCustomRange() sets them to a brand new, correct
+    // value — in that second case, localStorage still holds the OLD value
+    // (saveState() hasn't run yet), so unconditionally restoring here
+    // would silently overwrite the new range with the old one, then
+    // persist that wrong value back to storage moments later. That was
+    // the actual bug: every custom range fetch was quietly corrupting
+    // itself 100ms after completing. The visible date input fields are a
+    // separate, harmless concern — always safe to populate from saved
+    // state regardless, since that's just display, not the active range.
     if (s.currentRangeFrom && s.currentRangeTo) {
-      CURRENT_RANGE_FROM = s.currentRangeFrom;
-      CURRENT_RANGE_TO   = s.currentRangeTo;
+      if (!CURRENT_RANGE_FROM && !CURRENT_RANGE_TO) {
+        CURRENT_RANGE_FROM = s.currentRangeFrom;
+        CURRENT_RANGE_TO   = s.currentRangeTo;
+      }
       const fromEl = document.getElementById('fetch-from-date');
       const toEl   = document.getElementById('fetch-to-date');
       if (fromEl) fromEl.value = s.currentRangeFrom;
