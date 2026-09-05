@@ -2932,7 +2932,16 @@ async function fetchCustomRange() {
     CURRENT_RANGE_TO   = to;
     init();
     setTimeout(() => { restoreState(); saveState(); }, 100);
-    if (status) status.textContent = `✓ Loaded ${[...new Set(data.teams.map(r=>r.week))].length} weeks`;
+    const failedWeeks = data.meta?.failed_weeks || [];
+    if (failedWeeks.length > 0) {
+      if (status) {
+        status.style.color = 'var(--yellow, #f59e0b)';
+        status.textContent = `⚠ Loaded ${[...new Set(data.teams.map(r=>r.week))].length} weeks, but ${failedWeeks.length} week(s) failed to fetch and are missing: ${failedWeeks.map(f=>f.week).join(', ')}`;
+      }
+    } else if (status) {
+      status.style.color = 'var(--green)';
+      status.textContent = `✓ Loaded ${[...new Set(data.teams.map(r=>r.week))].length} weeks`;
+    }
   } catch(err) {
     if (status) status.textContent = `✗ Error: ${err.message}`;
   }
