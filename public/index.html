@@ -104,11 +104,9 @@
   .heatmap-cell{width:46px;height:36px;border-radius:6px;text-align:center;font-size:10px;font-family:'DM Mono',monospace;font-weight:500;cursor:default;vertical-align:middle;transition:transform .1s;padding:2px}
   .heatmap-cell:hover{transform:scale(1.12);z-index:10;position:relative}
   .hm-0{background:var(--surface2);color:var(--muted)}
-  .hm-1{background:rgba(34,197,94,.2);color:#4ade80}
-  .hm-2{background:rgba(34,197,94,.4);color:#22c55e}
-  .hm-3{background:rgba(245,158,11,.35);color:#f59e0b}
-  .hm-4{background:rgba(249,115,22,.45);color:#fb923c}
-  .hm-5{background:rgba(239,68,68,.5);color:#f87171}
+  .hm-1{background:rgba(34,197,94,.35);color:#22c55e}
+  .hm-2{background:rgba(249,115,22,.45);color:#fb923c}
+  .hm-3{background:rgba(239,68,68,.5);color:#f87171}
   .hm-team{font-size:12px;font-weight:600;white-space:nowrap;padding:6px 10px;text-align:left;background:transparent;color:var(--text)}
   /* Settings panel */
   .settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;backdrop-filter:blur(2px)}
@@ -215,10 +213,9 @@
         <div class="chart-card-subtitle">Percentage of available hours utilised per week</div>
       </div>
       <div class="legend">
-        <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>&lt;70% Healthy</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>70–85% Busy</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>85–95% High</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>&gt;95% Critical</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>&lt;80% Healthy</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>80–100% Busy</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>&gt;100% Overbooked</div>
       </div>
     </div>
     <div class="chart-container" style="height:380px"><canvas id="main-chart"></canvas></div>
@@ -252,11 +249,9 @@
         <div class="chart-card-subtitle">Hover cells to see exact %</div>
       </div>
       <div class="legend">
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.2)"></div>0–40%</div>
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.4)"></div>40–70%</div>
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(245,158,11,.35)"></div>70–85%</div>
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(249,115,22,.45)"></div>85–95%</div>
-        <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,.5)"></div>&gt;95%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(34,197,94,.35)"></div>0–80%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(249,115,22,.45)"></div>80–100%</div>
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(239,68,68,.5)"></div>&gt;100%</div>
       </div>
     </div>
     <div class="heatmap-grid" id="heatmap-container"></div>
@@ -1073,11 +1068,10 @@ function setViewMode(m) {
 }
 
 // ── Util helpers ──────────────────────────────────────────────────────────────
-function getUtilColor(p){ if(p>95)return'#ef4444';if(p>85)return'#f97316';if(p>70)return'#f59e0b';return'#22c55e'; }
+function getUtilColor(p){ if(p>100)return'#ef4444';if(p>80)return'#f97316';return'#22c55e'; }
 function getBadge(p){
-  if(p>95)return`<span class="badge badge-red">Critical</span>`;
-  if(p>85)return`<span class="badge badge-orange">High</span>`;
-  if(p>70)return`<span class="badge badge-yellow">Busy</span>`;
+  if(p>100)return`<span class="badge badge-red">Overbooked</span>`;
+  if(p>80)return`<span class="badge badge-orange">Busy</span>`;
   if(p>0) return`<span class="badge badge-green">Healthy</span>`;
   return`<span class="badge" style="background:rgba(107,114,128,.15);color:var(--muted)">No Data</span>`;
 }
@@ -1154,13 +1148,13 @@ function renderTeamView(tf,weeks){
     ta+=a;tu+=u;
     const p=a>0?u/a*100:0;
     if(p>maxU){maxU=p;maxT=t;}
-    if(p>85)over++;
+    if(p>80)over++;
   }
   const avg=ta>0?tu/ta*100:0;
   document.getElementById('kpi-grid').innerHTML=`
     <div class="kpi" style="--kpi-color:var(--accent)"><div class="kpi-label">Avg Utilisation</div><div class="kpi-value" style="color:${getUtilColor(avg)}">${avg.toFixed(0)}%</div><div class="kpi-sub">${tu.toFixed(0)} / ${ta.toFixed(0)} hrs</div></div>
     <div class="kpi" style="--kpi-color:var(--red)"><div class="kpi-label">Highest Team</div><div class="kpi-value" style="font-size:18px;color:${getUtilColor(maxU)}">${maxT||'—'}</div><div class="kpi-sub">${maxU.toFixed(0)}% utilised</div></div>
-    <div class="kpi" style="--kpi-color:var(--orange)"><div class="kpi-label">Teams &gt;85%</div><div class="kpi-value" style="color:${over>0?'var(--orange)':'var(--green)'}">${over}</div><div class="kpi-sub">of ${teams.length} teams</div></div>
+    <div class="kpi" style="--kpi-color:var(--orange)"><div class="kpi-label">Teams &gt;80%</div><div class="kpi-value" style="color:${over>0?'var(--orange)':'var(--green)'}">${over}</div><div class="kpi-sub">of ${teams.length} teams</div></div>
     <div class="kpi" style="--kpi-color:var(--green)"><div class="kpi-label">Weeks Shown</div><div class="kpi-value">${weeks.length}</div><div class="kpi-sub">${weeks[0]} → ${weeks[weeks.length-1]}</div></div>`;
   const pal=['#4f8ef7','#22c55e','#f59e0b','#ef4444','#a78bfa','#fb923c','#34d399','#f472b6','#60a5fa','#facc15','#c084fc','#38bdf8','#4ade80','#fbbf24','#f87171'];
   const ds=teams.slice(0,15).map((t,i)=>({
@@ -1234,7 +1228,7 @@ function renderHeatmap(){
   }
   const teams=tf==='ALL'?getVisibleTeams():[tf];
   const data=aggregateTeamWeekly(tf,weeks);
-  function hmClass(p){if(p===0)return'hm-0';if(p<40)return'hm-1';if(p<70)return'hm-2';if(p<85)return'hm-3';if(p<95)return'hm-4';return'hm-5';}
+  function hmClass(p){if(p===0)return'hm-0';if(p<=80)return'hm-1';if(p<=100)return'hm-2';return'hm-3';}
   // Table is width:auto so it only takes as much space as needed
   // Team label column is fixed-width, data columns are compact — cells start flush from left
   let h=`<table class="heatmap-table" style="width:auto;table-layout:fixed"><thead><tr>` +
@@ -1271,7 +1265,22 @@ function renderEngineers(){
   const pcts=top.map(e=>+(e.util/e.avail*100).toFixed(1));
   if(engChart)engChart.destroy();
   const ctx=document.getElementById('eng-chart').getContext('2d');
-  const redLine80={id:'redLine80',afterDraw(chart){const{ctx:c,chartArea:{left,right},scales:{y}}=chart;if(!y)return;const y80=y.getPixelForValue(80);c.save();c.fillStyle='rgba(239,68,68,0.08)';c.fillRect(left,chart.chartArea.top,right-left,Math.max(0,y80-chart.chartArea.top));c.strokeStyle='rgba(239,68,68,0.4)';c.lineWidth=1;c.setLineDash([4,4]);c.beginPath();c.moveTo(left,y80);c.lineTo(right,y80);c.stroke();c.setLineDash([]);c.restore();}};
+  const redLine80={id:'redLine80',afterDraw(chart){
+    const{ctx:c,chartArea:{left,right,top,bottom},scales:{y}}=chart;
+    if(!y)return;
+    const y80=y.getPixelForValue(80);
+    const y100=y.getPixelForValue(100);
+    c.save();
+    // Orange zone: 80-100%
+    const zoneTop=Math.max(y100,top), zoneBottom=Math.min(y80,bottom);
+    if(zoneBottom>zoneTop){c.fillStyle='rgba(249,115,22,0.08)';c.fillRect(left,zoneTop,right-left,zoneBottom-zoneTop);}
+    // Red zone: above 100%
+    if(y100>top){c.fillStyle='rgba(239,68,68,0.08)';c.fillRect(left,top,right-left,Math.min(y100,bottom)-top);}
+    c.strokeStyle='rgba(249,115,22,0.4)';c.lineWidth=1;c.setLineDash([4,4]);
+    c.beginPath();c.moveTo(left,y80);c.lineTo(right,y80);c.stroke();
+    if(y100>=top&&y100<=bottom){c.strokeStyle='rgba(239,68,68,0.4)';c.beginPath();c.moveTo(left,y100);c.lineTo(right,y100);c.stroke();}
+    c.setLineDash([]);c.restore();
+  }};
   engChart=new Chart(ctx,{
     type:'bar',
     data:{labels:top.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' ')),datasets:[{label:'Utilisation %',data:pcts,backgroundColor:pcts.map(p=>getUtilColor(p)),borderRadius:6}]},
@@ -2273,14 +2282,14 @@ function renderScenario(){
   for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;
         // Only show in bottleneck if this team has actual forecast load
         if(x===0)continue;
-        const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>85)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
+        const bp2=d.util/d.avail*100;const pp=(d.util+x)/d.avail*100;if(pp>80)bn.push({team:t,week:w,basePct:bp2,extra:x,projPct:pp});}
   let ah='';const crit={},warn={};
-  for(const b of bn){if(b.projPct>95)(crit[b.team]=crit[b.team]||[]).push(b);else(warn[b.team]=warn[b.team]||[]).push(b);}
-  for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 95% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
-  for(const[t,bs]of Object.entries(warn))ah+=`<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">85–95% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}.</div></div></div>`;
+  for(const b of bn){if(b.projPct>100)(crit[b.team]=crit[b.team]||[]).push(b);else(warn[b.team]=warn[b.team]||[]).push(b);}
+  for(const[t,bs]of Object.entries(crit))ah+=`<div class="alert alert-critical"><div class="alert-icon">🚨</div><div><div class="alert-title">Critical: ${t}</div><div class="alert-body">Exceeds 100% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}. Peak: ${Math.max(...bs.map(b=>b.projPct)).toFixed(0)}%</div></div></div>`;
+  for(const[t,bs]of Object.entries(warn))ah+=`<div class="alert alert-warning"><div class="alert-icon">⚠️</div><div><div class="alert-title">Warning: ${t}</div><div class="alert-body">80–100% in ${bs.length} wk(s): ${bs.map(b=>weekColumnLabel(b.week)).join(', ')}.</div></div></div>`;
   document.getElementById('alert-container').innerHTML=bn.length?`<div class="alert-list">${ah}</div>`:(forecastProjects.length||addPersonForecast?'<div class="alert-list"><div class="alert" style="background:rgba(34,197,94,.08);border-color:var(--green)"><div class="alert-icon">✅</div><div><div class="alert-title">No bottlenecks detected</div></div></div></div>':'');
   const tbody=document.getElementById('bottleneck-body');
-  if(!bn.length){tbody.innerHTML=`<tr><td colspan="6" class="empty">${forecastProjects.length||addPersonForecast?'No weeks exceed 85%.':'Add a project to see analysis.'}</td></tr>`;return;}
+  if(!bn.length){tbody.innerHTML=`<tr><td colspan="6" class="empty">${forecastProjects.length||addPersonForecast?'No weeks exceed 80%.':'Add a project to see analysis.'}</td></tr>`;return;}
   tbody.innerHTML=bn.sort((a,b)=>b.projPct-a.projPct).map(b=>`<tr><td style="font-weight:600">${b.team}</td><td class="mono">${weekColumnLabel(b.week)}</td><td>${utilBar(b.basePct)}</td><td class="mono" style="color:var(--orange)">+${b.extra.toFixed(0)}h</td><td>${utilBar(b.projPct)}</td><td>${getBadge(b.projPct)}</td></tr>`).join('');
 }
 
@@ -2288,25 +2297,46 @@ function renderScenario(){
 function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
   if(existing)existing.destroy();
   const ctx=document.getElementById(canvasId).getContext('2d');
-  // Red zone plugin: shades area above 80% red
+  // Zone plugin: shades 80-100% orange, above 100% red — below 80% is left
+  // as the chart's normal background (no tint).
   const redZonePlugin = {
     id:'redZone',
     beforeDraw(chart){
       if(isBar) return;
       const {ctx:c,chartArea:{left,right,top,bottom},scales:{y}} = chart;
       if(!y) return;
-      const y80 = y.getPixelForValue(80);
-      if(y80 < top) return;
+      const y80  = y.getPixelForValue(80);
+      const y100 = y.getPixelForValue(100);
       c.save();
-      c.fillStyle='rgba(239,68,68,0.08)';
-      c.fillRect(left, top, right-left, Math.min(y80,bottom)-top);
-      c.strokeStyle='rgba(239,68,68,0.4)';
+      // Orange zone: 80% to 100% (or to the top of the chart if it doesn't reach 100%)
+      if (y80 > top || y100 > top) {
+        const zoneTop = Math.max(y100, top);
+        const zoneBottom = Math.min(y80, bottom);
+        if (zoneBottom > zoneTop) {
+          c.fillStyle='rgba(249,115,22,0.08)';
+          c.fillRect(left, zoneTop, right-left, zoneBottom-zoneTop);
+        }
+      }
+      // Red zone: above 100%
+      if (y100 > top) {
+        c.fillStyle='rgba(239,68,68,0.08)';
+        c.fillRect(left, top, right-left, Math.min(y100,bottom)-top);
+      }
+      // Dashed reference lines at 80% and 100%
+      c.strokeStyle='rgba(249,115,22,0.4)';
       c.lineWidth=1;
       c.setLineDash([4,4]);
       c.beginPath();
       c.moveTo(left, y80);
       c.lineTo(right, y80);
       c.stroke();
+      if (y100 >= top && y100 <= bottom) {
+        c.strokeStyle='rgba(239,68,68,0.4)';
+        c.beginPath();
+        c.moveTo(left, y100);
+        c.lineTo(right, y100);
+        c.stroke();
+      }
       c.setLineDash([]);
       c.restore();
     }
