@@ -1265,22 +1265,7 @@ function renderEngineers(){
   const pcts=top.map(e=>+(e.util/e.avail*100).toFixed(1));
   if(engChart)engChart.destroy();
   const ctx=document.getElementById('eng-chart').getContext('2d');
-  const redLine80={id:'redLine80',afterDraw(chart){
-    const{ctx:c,chartArea:{left,right,top,bottom},scales:{y}}=chart;
-    if(!y)return;
-    const y80=y.getPixelForValue(80);
-    const y100=y.getPixelForValue(100);
-    c.save();
-    // Orange zone: 80-100%
-    const zoneTop=Math.max(y100,top), zoneBottom=Math.min(y80,bottom);
-    if(zoneBottom>zoneTop){c.fillStyle='rgba(249,115,22,0.08)';c.fillRect(left,zoneTop,right-left,zoneBottom-zoneTop);}
-    // Red zone: above 100%
-    if(y100>top){c.fillStyle='rgba(239,68,68,0.08)';c.fillRect(left,top,right-left,Math.min(y100,bottom)-top);}
-    c.strokeStyle='rgba(249,115,22,0.4)';c.lineWidth=1;c.setLineDash([4,4]);
-    c.beginPath();c.moveTo(left,y80);c.lineTo(right,y80);c.stroke();
-    if(y100>=top&&y100<=bottom){c.strokeStyle='rgba(239,68,68,0.4)';c.beginPath();c.moveTo(left,y100);c.lineTo(right,y100);c.stroke();}
-    c.setLineDash([]);c.restore();
-  }};
+  const redLine80 = makeZoneShadingPlugin();
   engChart=new Chart(ctx,{
     type:'bar',
     data:{labels:top.map(e=>e.name.split(' ').map((w,i)=>i===0?w[0]+'.':w).join(' ')),datasets:[{label:'Utilisation %',data:pcts,backgroundColor:pcts.map(p=>getUtilColor(p)),borderRadius:6}]},
@@ -2277,7 +2262,7 @@ function renderScenario(){
   const fp=weeks.map(w=>{const d=baseline[st]?.[w];if(!d||d.avail===0)return null;const x=fl[st]?.[w]||0;return+((d.util+x)/d.avail*100).toFixed(1);});
   if(scenarioChart)scenarioChart.destroy();
   const ctx=document.getElementById('scenario-chart').getContext('2d');
-  scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>weekColumnLabel(w)),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}}});
+  scenarioChart=new Chart(ctx,{type:'line',data:{labels:weeks.map(w=>weekColumnLabel(w)),datasets:[{label:'Baseline',data:bp,borderColor:'#4f8ef7',backgroundColor:'#4f8ef722',tension:.4,borderWidth:2,pointRadius:3,spanGaps:true},{label:'With Forecast',data:fp,borderColor:'#ef4444',backgroundColor:'#ef444422',borderDash:[6,4],tension:.4,borderWidth:2,pointRadius:4,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0',font:{family:'Syne'}}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw??'—'}%`}}},scales:{x:{ticks:{color:'#6b7280',font:{family:'DM Mono',size:11}},grid:{color:'#2a2f3d'}},y:{min:0,suggestedMax:110,ticks:{color:'#6b7280',callback:v=>v+'%'},grid:{color:'#2a2f3d'}}}},plugins:[makeZoneShadingPlugin()]});
   const bn=[];
   for(const t of ALL_TEAMS)for(const w of weeks){const d=baseline[t]?.[w];if(!d||d.avail===0)continue;const x=fl[t]?.[w]||0;
         // Only show in bottleneck if this team has actual forecast load
@@ -2297,50 +2282,7 @@ function renderScenario(){
 function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
   if(existing)existing.destroy();
   const ctx=document.getElementById(canvasId).getContext('2d');
-  // Zone plugin: shades 80-100% orange, above 100% red — below 80% is left
-  // as the chart's normal background (no tint).
-  const redZonePlugin = {
-    id:'redZone',
-    beforeDraw(chart){
-      if(isBar) return;
-      const {ctx:c,chartArea:{left,right,top,bottom},scales:{y}} = chart;
-      if(!y) return;
-      const y80  = y.getPixelForValue(80);
-      const y100 = y.getPixelForValue(100);
-      c.save();
-      // Orange zone: 80% to 100% (or to the top of the chart if it doesn't reach 100%)
-      if (y80 > top || y100 > top) {
-        const zoneTop = Math.max(y100, top);
-        const zoneBottom = Math.min(y80, bottom);
-        if (zoneBottom > zoneTop) {
-          c.fillStyle='rgba(249,115,22,0.08)';
-          c.fillRect(left, zoneTop, right-left, zoneBottom-zoneTop);
-        }
-      }
-      // Red zone: above 100%
-      if (y100 > top) {
-        c.fillStyle='rgba(239,68,68,0.08)';
-        c.fillRect(left, top, right-left, Math.min(y100,bottom)-top);
-      }
-      // Dashed reference lines at 80% and 100%
-      c.strokeStyle='rgba(249,115,22,0.4)';
-      c.lineWidth=1;
-      c.setLineDash([4,4]);
-      c.beginPath();
-      c.moveTo(left, y80);
-      c.lineTo(right, y80);
-      c.stroke();
-      if (y100 >= top && y100 <= bottom) {
-        c.strokeStyle='rgba(239,68,68,0.4)';
-        c.beginPath();
-        c.moveTo(left, y100);
-        c.lineTo(right, y100);
-        c.stroke();
-      }
-      c.setLineDash([]);
-      c.restore();
-    }
-  };
+  const redZonePlugin = makeZoneShadingPlugin(() => isBar);
   // Restore hidden datasets from savedHighlight (array of hidden labels)
   if (!isBar && Array.isArray(savedHighlight)) {
     datasets = datasets.map(ds => ({
@@ -2384,6 +2326,48 @@ function drawLineChart(canvasId,labels,datasets,existing,setter,isBar=false){
 }
 
 // ── Week label helper (used by scenario planner) ──────────────────────────────
+// Shared background-shading plugin for any Chart.js line chart plotting a
+// utilisation percentage: orange tint 80-100%, red tint above 100%, and no
+// tint below 80% (left as the chart's normal background). Used by the main
+// utilisation chart, the engineer bar chart, and the Scenario Planner
+// chart, so all three always show identical zone shading rather than three
+// separately-maintained copies that could drift out of sync.
+function makeZoneShadingPlugin(skipForBar) {
+  return {
+    id: 'zoneShading',
+    beforeDraw(chart) {
+      if (skipForBar && skipForBar(chart)) return;
+      const { ctx:c, chartArea:{left,right,top,bottom}, scales:{y} } = chart;
+      if (!y) return;
+      const y80  = y.getPixelForValue(80);
+      const y100 = y.getPixelForValue(100);
+      c.save();
+      // Orange zone: 80% to 100% (clamped to the visible chart area)
+      const zoneTop = Math.max(y100, top), zoneBottom = Math.min(y80, bottom);
+      if (zoneBottom > zoneTop) {
+        c.fillStyle = 'rgba(249,115,22,0.08)';
+        c.fillRect(left, zoneTop, right-left, zoneBottom-zoneTop);
+      }
+      // Red zone: above 100%
+      if (y100 > top) {
+        c.fillStyle = 'rgba(239,68,68,0.08)';
+        c.fillRect(left, top, right-left, Math.min(y100,bottom)-top);
+      }
+      // Dashed reference lines at 80% and 100%
+      c.strokeStyle = 'rgba(249,115,22,0.4)';
+      c.lineWidth = 1;
+      c.setLineDash([4,4]);
+      c.beginPath(); c.moveTo(left,y80); c.lineTo(right,y80); c.stroke();
+      if (y100 >= top && y100 <= bottom) {
+        c.strokeStyle = 'rgba(239,68,68,0.4)';
+        c.beginPath(); c.moveTo(left,y100); c.lineTo(right,y100); c.stroke();
+      }
+      c.setLineDash([]);
+      c.restore();
+    }
+  };
+}
+
 function toWeekLabel(date){
   const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));
   const dn=d.getUTCDay()||7;
